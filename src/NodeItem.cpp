@@ -372,7 +372,8 @@ void NodeItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *option, 
     }
 
     // 悬停时在四边中点显示连接点。
-    if (m_hover && !m_editing) {
+    const CanvasScene *cs = canvasScene();
+    if (m_hover && !m_editing && !(cs && cs->isExporting())) {
         painter->setPen(QPen(t.accent, 1.2));
         painter->setBrush(t.nodeFill);
         for (int i = 0; i < 4; ++i)

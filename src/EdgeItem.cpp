@@ -108,7 +108,8 @@ void EdgeItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *option, 
 {
     const Theme &t = Theme::current();
     const bool selected = option->state & QStyle::State_Selected;
-    const bool active = selected || m_hover;
+    const CanvasScene *cs = qobject_cast<CanvasScene *>(scene());
+    const bool active = (selected || m_hover) && !(cs && cs->isExporting());
     const QColor color = active ? t.accent : t.edge;
 
     painter->setRenderHint(QPainter::Antialiasing, true);

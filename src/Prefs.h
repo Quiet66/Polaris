@@ -25,6 +25,17 @@ public:
     bool reduceMotion() const;          // 精简动效（M6 生效）
     void setReduceMotion(bool on);
 
+    QString lastFile() const;           // 上次保存或打开的文件
+    void setLastFile(const QString &path);
+
+    QString lastDir() const;            // 文件对话框的起始目录
+    void setLastDir(const QString &dir);
+
+    // 草稿：内容变化后定时写到数据目录；draftSource 记录草稿对应的文件（未命名时为空）。
+    QString draftPath() const;
+    QString draftSource() const;
+    void setDraftSource(const QString &path);
+
 private:
     Prefs();
     ~Prefs();

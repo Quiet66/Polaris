@@ -6,6 +6,8 @@ build/obj/NodeItem.o
 build/obj/EdgeItem.o
 build/obj/Commands.o
 build/obj/Document.o
+build/obj/MdIo.o
+build/obj/Exporter.o
 build/obj/Theme.o
 build/obj/Prefs.o
 build/obj/WinNative.o

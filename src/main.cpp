@@ -22,5 +22,11 @@ int main(int argc, char *argv[])
 
     MainWindow w;
     w.show();
+
+    // 先看有没有需要恢复的草稿；没有恢复草稿时，命令行带了文件就打开它。
+    const QStringList args = QCoreApplication::arguments();
+    if (!w.checkDraftOnStartup() && args.size() > 1)
+        w.openFile(args.at(1));
+
     return app.exec();
 }

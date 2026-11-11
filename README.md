@@ -39,6 +39,17 @@ aqt install-tool -b https://master.qt.io -O /opt/Qt windows desktop tools_mingw 
 xvfb-run -a scripts/wine-build.sh               # 生成 dist/TrailCanvas 和 dist/TrailCanvas.zip
 ```
 
+## 测试
+
+`tests/` 里是 MdIo（大纲生成规则、保存读入往返）的控制台测试：
+
+```
+xvfb-run -a scripts/wine-test.sh        # Linux + Wine
+```
+
+Windows 上：进入 `tests\`，`qmake tst_mdio.pro -spec win32-g++ CONFIG+=release`，
+`mingw32-make`，运行 `build\tst_mdio.exe`。
+
 ## 打包说明
 
 没有使用 `windeployqt`：Qt 5.15.2 MinGW 版的 `windeployqt` 会把未 strip 的插件误判为

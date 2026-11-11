@@ -7,7 +7,6 @@
 #include <QMouseEvent>
 #include <QScrollBar>
 #include <QUndoStack>
-#include <QVarLengthArray>
 #include <QWheelEvent>
 #include <QtMath>
 
@@ -114,41 +113,7 @@ bool CanvasView::event(QEvent *event)
 
 void CanvasView::drawBackground(QPainter *painter, const QRectF &rect)
 {
-    const Theme &t = Theme::current();
-    painter->fillRect(rect, t.canvas);
-
-    const QString mode = m_scene->settings().background;
-    if (mode == QLatin1String("plain"))
-        return;
-
-    // 缩得很小时把密度逐级减半，保持屏幕上的间距不小于 gridMinPixelStep。
-    qreal step = t.gridStep;
-    while (step * zoom() < t.gridMinPixelStep)
-        step *= 2;
-
-    const qreal left = qFloor(rect.left() / step) * step;
-    const qreal top  = qFloor(rect.top() / step) * step;
-
-    if (mode == QLatin1String("lines")) {
-        QVarLengthArray<QLineF, 256> lines;
-        for (qreal x = left; x <= rect.right(); x += step)
-            lines.append(QLineF(x, rect.top(), x, rect.bottom()));
-        for (qreal y = top; y <= rect.bottom(); y += step)
-            lines.append(QLineF(rect.left(), y, rect.right(), y));
-        painter->setRenderHint(QPainter::Antialiasing, false);
-        painter->setPen(QPen(t.grid, 0));       // 0 = 恒为 1 像素
-        painter->drawLines(lines.data(), lines.size());
-        painter->setRenderHint(QPainter::Antialiasing, true);
-    } else {
-        QVarLengthArray<QPointF, 1024> pts;
-        for (qreal x = left; x <= rect.right(); x += step)
-            for (qreal y = top; y <= rect.bottom(); y += step)
-                pts.append(QPointF(x, y));
-        QPen pen(t.grid, 2, Qt::SolidLine, Qt::RoundCap);
-        pen.setCosmetic(true);                  // 点的大小不随缩放变化
-        painter->setPen(pen);
-        painter->drawPoints(pts.data(), pts.size());
-    }
+    m_scene->paintBackground(painter, rect, zoom());
 }
 
 void CanvasView::wheelEvent(QWheelEvent *event)

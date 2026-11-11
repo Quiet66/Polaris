@@ -94,3 +94,41 @@ void Prefs::setReduceMotion(bool on)
     m_settings->setValue(K("ui/reduceMotion"), on);
     m_settings->sync();
 }
+
+QString Prefs::lastFile() const
+{
+    return m_settings->value(K("file/last")).toString();
+}
+
+void Prefs::setLastFile(const QString &path)
+{
+    m_settings->setValue(K("file/last"), path);
+    m_settings->sync();
+}
+
+QString Prefs::lastDir() const
+{
+    return m_settings->value(K("file/dir")).toString();
+}
+
+void Prefs::setLastDir(const QString &dir)
+{
+    m_settings->setValue(K("file/dir"), dir);
+    m_settings->sync();
+}
+
+QString Prefs::draftPath() const
+{
+    return m_dataDir + QStringLiteral("/draft.md");
+}
+
+QString Prefs::draftSource() const
+{
+    return m_settings->value(K("file/draftSource")).toString();
+}
+
+void Prefs::setDraftSource(const QString &path)
+{
+    m_settings->setValue(K("file/draftSource"), path);
+    m_settings->sync();
+}

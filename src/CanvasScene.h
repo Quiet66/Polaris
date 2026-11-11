@@ -35,6 +35,18 @@ public:
     NodeItem *nodeAt(const QPointF &scenePos) const;
     NodeItem *editingNode() const;
     QRectF    nodesBoundingRect() const;
+    QRectF    contentBoundingRect() const;      // 节点和连线
+    bool      isEmpty() const { return m_nodes.isEmpty(); }
+
+    // 画布背景（纯色 / 点阵 / 线阵）。视图和导出共用；zoom 用来决定网格密度。
+    void paintBackground(QPainter *painter, const QRectF &rect, qreal zoom) const;
+
+    // 导出图片期间：不画选中状态和连接点，并关闭图元缓存。
+    void beginExport();
+    void endExport();
+    bool isExporting() const { return m_exporting; }
+
+    void commitEditing();                       // 如果正在编辑文字，先确认
 
     // ---- 底层操作：直接改场景，不进撤销栈（供 Commands 和载入使用）
     NodeItem *addNode(const NodeData &data);
@@ -89,6 +101,9 @@ private:
     QString m_pendingEdgeId;
 
     QHash<QString, QPointF> m_dragStart;        // 拖动开始时被选中节点的位置
+
+    bool                    m_exporting = false;
+    QList<QGraphicsItem *>  m_selectionBeforeExport;
 
     NodeItem          *m_linkFrom = nullptr;
     QGraphicsPathItem *m_linkPreview = nullptr;

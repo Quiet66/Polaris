@@ -5,6 +5,9 @@
 
 #include <QGraphicsPathItem>
 #include <QGraphicsSceneMouseEvent>
+#include <QPainter>
+#include <QVarLengthArray>
+#include <QtMath>
 #include <QPen>
 #include <QPointer>
 #include <QTimer>
@@ -91,6 +94,83 @@ QRectF CanvasScene::nodesBoundingRect() const
     for (NodeItem *n : m_nodes)
         r |= n->sceneBodyRect();
     return r;
+}
+
+QRectF CanvasScene::contentBoundingRect() const
+{
+    QRectF r = nodesBoundingRect();
+    for (EdgeItem *e : m_edges)
+        r |= e->boundingRect();
+    return r;
+}
+
+void CanvasScene::paintBackground(QPainter *painter, const QRectF &rect, qreal zoom) const
+{
+    const Theme &t = Theme::current();
+    painter->fillRect(rect, t.canvas);
+
+    const QString &mode = m_settings.background;
+    if (mode == QLatin1String("plain"))
+        return;
+
+    // 缩得很小时把密度逐级减半，保持屏幕上的间距不小于 gridMinPixelStep。
+    qreal step = t.gridStep;
+    while (step * zoom < t.gridMinPixelStep)
+        step *= 2;
+
+    const qreal left = qFloor(rect.left() / step) * step;
+    const qreal top  = qFloor(rect.top() / step) * step;
+
+    painter->save();
+    if (mode == QLatin1String("lines")) {
+        QVarLengthArray<QLineF, 256> lines;
+        for (qreal x = left; x <= rect.right(); x += step)
+            lines.append(QLineF(x, rect.top(), x, rect.bottom()));
+        for (qreal y = top; y <= rect.bottom(); y += step)
+            lines.append(QLineF(rect.left(), y, rect.right(), y));
+        painter->setRenderHint(QPainter::Antialiasing, false);
+        painter->setPen(QPen(t.grid, 0));       // 0 = 恒为 1 像素
+        painter->drawLines(lines.data(), lines.size());
+    } else {
+        QVarLengthArray<QPointF, 1024> pts;
+        for (qreal x = left; x <= rect.right(); x += step)
+            for (qreal y = top; y <= rect.bottom(); y += step)
+                pts.append(QPointF(x, y));
+        QPen pen(t.grid, 2, Qt::SolidLine, Qt::RoundCap);
+        pen.setCosmetic(true);                  // 点的大小不随缩放变化
+        painter->setRenderHint(QPainter::Antialiasing, true);
+        painter->setPen(pen);
+        painter->drawPoints(pts.data(), pts.size());
+    }
+    painter->restore();
+}
+
+void CanvasScene::beginExport()
+{
+    commitEditing();
+    m_selectionBeforeExport = selectedItems();
+    clearSelection();
+    m_exporting = true;
+    for (NodeItem *n : qAsConst(m_nodes))
+        n->setCacheMode(QGraphicsItem::NoCache);
+}
+
+void CanvasScene::endExport()
+{
+    m_exporting = false;
+    for (NodeItem *n : qAsConst(m_nodes)) {
+        n->setCacheMode(QGraphicsItem::DeviceCoordinateCache);
+        n->update();
+    }
+    for (QGraphicsItem *it : qAsConst(m_selectionBeforeExport))
+        it->setSelected(true);
+    m_selectionBeforeExport.clear();
+}
+
+void CanvasScene::commitEditing()
+{
+    if (NodeItem *n = editingNode())
+        n->endEdit(NodeItem::Commit);
 }
 
 // -------------------------------------------------------------------- 底层操作

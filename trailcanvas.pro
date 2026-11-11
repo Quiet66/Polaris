@@ -20,6 +20,8 @@ SOURCES += \
     src/EdgeItem.cpp \
     src/Commands.cpp \
     src/Document.cpp \
+    src/MdIo.cpp \
+    src/Exporter.cpp \
     src/Theme.cpp \
     src/Prefs.cpp \
     src/WinNative.cpp
@@ -32,6 +34,8 @@ HEADERS += \
     src/EdgeItem.h \
     src/Commands.h \
     src/Document.h \
+    src/MdIo.h \
+    src/Exporter.h \
     src/Theme.h \
     src/Prefs.h \
     src/WinNative.h
