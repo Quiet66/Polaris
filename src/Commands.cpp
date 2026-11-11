@@ -106,3 +106,28 @@ void EditTextCommand::redo()
 {
     m_scene->setNodeText(m_id, m_new);
 }
+
+ChangeNodesCommand::ChangeNodesCommand(CanvasScene *scene, const QVector<NodeChange> &changes,
+                                       bool alreadyApplied, const QString &text)
+    : QUndoCommand(text)
+    , m_scene(scene)
+    , m_changes(changes)
+    , m_skipRedo(alreadyApplied)
+{
+}
+
+void ChangeNodesCommand::undo()
+{
+    for (const NodeChange &c : qAsConst(m_changes))
+        m_scene->setNodeStyle(c.before);
+}
+
+void ChangeNodesCommand::redo()
+{
+    if (m_skipRedo) {
+        m_skipRedo = false;
+        return;
+    }
+    for (const NodeChange &c : qAsConst(m_changes))
+        m_scene->setNodeStyle(c.after);
+}

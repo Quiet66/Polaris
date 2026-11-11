@@ -64,6 +64,27 @@ private:
     bool              m_skipRedo;
 };
 
+// 节点的宽度、字号、位置变化（拖宽度手柄、调字号）。
+struct NodeChange
+{
+    NodeData before;
+    NodeData after;
+};
+
+class ChangeNodesCommand : public QUndoCommand
+{
+public:
+    ChangeNodesCommand(CanvasScene *scene, const QVector<NodeChange> &changes,
+                       bool alreadyApplied, const QString &text);
+    void undo() override;
+    void redo() override;
+
+private:
+    CanvasScene        *m_scene;
+    QVector<NodeChange> m_changes;
+    bool                m_skipRedo;
+};
+
 class EditTextCommand : public QUndoCommand
 {
 public:

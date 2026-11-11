@@ -21,6 +21,7 @@ SOURCES += \
     src/Commands.cpp \
     src/Document.cpp \
     src/Theme.cpp \
+    src/Prefs.cpp \
     src/WinNative.cpp
 
 HEADERS += \
@@ -32,6 +33,7 @@ HEADERS += \
     src/Commands.h \
     src/Document.h \
     src/Theme.h \
+    src/Prefs.h \
     src/WinNative.h
 
 LIBS += -luser32

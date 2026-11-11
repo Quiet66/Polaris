@@ -159,7 +159,45 @@ void CanvasScene::setNodeText(const QString &id, const QString &text)
         n->setText(text);
 }
 
+void CanvasScene::setNodeStyle(const NodeData &d)
+{
+    if (NodeItem *n = m_nodes.value(d.id)) {
+        n->setPos(d.x, d.y);
+        n->setStyle(d.w, d.fontSize);
+    }
+}
+
 // -------------------------------------------------------------------- 用户操作
+
+void CanvasScene::changeFontSize(int steps)
+{
+    const Theme &t = Theme::current();
+    QVector<NodeChange> changes;
+    const QList<NodeItem *> sel = selectedNodes();
+    for (NodeItem *n : sel) {
+        NodeChange c;
+        c.before = c.after = n->data();
+        if (steps == 0) {
+            c.after.fontSize = 0;
+        } else {
+            const qreal cur = c.before.fontSize > 0 ? c.before.fontSize : t.defaultFontSize;
+            c.after.fontSize = qBound(t.minFontSize, cur + steps, t.maxFontSize);
+        }
+        if (!qFuzzyCompare(c.after.fontSize + 1, c.before.fontSize + 1))
+            changes.append(c);
+    }
+    if (!changes.isEmpty())
+        m_undo->push(new ChangeNodesCommand(this, changes, false, QStringLiteral("字号")));
+}
+
+void CanvasScene::nodeResized(const NodeData &before, const NodeData &after)
+{
+    if (qFuzzyCompare(before.w + 1, after.w + 1) && qFuzzyCompare(before.x + 1, after.x + 1))
+        return;
+    QVector<NodeChange> changes;
+    changes.append(NodeChange{before, after});
+    m_undo->push(new ChangeNodesCommand(this, changes, true, QStringLiteral("调整宽度")));
+}
 
 void CanvasScene::startPendingNode(const QPointF &topLeft, NodeItem *from)
 {
@@ -373,7 +411,9 @@ void CanvasScene::mousePressEvent(QGraphicsSceneMouseEvent *event)
 {
     QGraphicsScene::mousePressEvent(event);
     m_dragStart.clear();
-    if (event->button() == Qt::LeftButton && !m_linkFrom) {
+    // 正在拖连线或拖宽度手柄时，不当作移动节点。
+    const NodeItem *grabber = qgraphicsitem_cast<NodeItem *>(mouseGrabberItem());
+    if (event->button() == Qt::LeftButton && !(grabber && grabber->isBusy())) {
         const QList<NodeItem *> sel = selectedNodes();
         for (NodeItem *n : sel)
             m_dragStart.insert(n->id(), n->pos());

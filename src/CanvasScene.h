@@ -43,12 +43,15 @@ public:
     void      removeEdge(const QString &id);
     void      setNodePos(const QString &id, const QPointF &pos);
     void      setNodeText(const QString &id, const QString &text);
+    void      setNodeStyle(const NodeData &d);  // 按 d.id 应用 w、fontSize、x、y
 
     // ---- 用户操作：进撤销栈
     void createNodeAt(const QPointF &scenePos);     // 双击空白处
     void createLinkedNode(NodeItem *from);          // Tab
     void deleteSelection();                         // Delete / Backspace
     void selectAllNodes();                          // Ctrl+A
+    void changeFontSize(int steps);                 // Ctrl+= / Ctrl+-；0 = 恢复默认（Ctrl+0）
+    void nodeResized(const NodeData &before, const NodeData &after);   // 拖完宽度手柄
 
     // 从连接点拖线（由 NodeItem 调用）
     void beginLinkDrag(NodeItem *from, const QPointF &scenePos);

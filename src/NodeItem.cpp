@@ -3,6 +3,7 @@
 #include "EdgeItem.h"
 #include "Theme.h"
 
+#include <QAbstractTextDocumentLayout>
 #include <QApplication>
 #include <QGraphicsSceneMouseEvent>
 #include <QInputMethodEvent>
@@ -25,8 +26,10 @@ NodeTextItem::NodeTextItem(NodeItem *owner)
     document()->setDefaultTextOption(opt);
 
     setTextInteractionFlags(Qt::NoTextInteraction);
-    setAcceptedMouseButtons(Qt::NoButton);      // 平时让点击和拖动落到节点上
-    setCacheMode(DeviceCoordinateCache);
+    setAcceptedMouseButtons(Qt::NoButton);
+    // 平时隐藏：文字由 NodeItem 画进它自己的缓存（少一层图元，拖动缩放更省）；
+    // 只有编辑时才显示出来接收输入。
+    setVisible(false);
 
     QObject::connect(document(), &QTextDocument::contentsChanged, this, [this]() {
         if (m_owner->isEditing())
@@ -129,6 +132,13 @@ void NodeItem::setText(const QString &text)
     relayout();
 }
 
+void NodeItem::setStyle(qreal w, qreal fontSize)
+{
+    m_data.w = w;
+    m_data.fontSize = fontSize;
+    relayout();
+}
+
 void NodeItem::relayout()
 {
     const Theme &t = Theme::current();
@@ -201,6 +211,22 @@ int NodeItem::portAt(const QPointF &p) const
     return -1;
 }
 
+int NodeItem::gripAt(const QPointF &p) const
+{
+    // 宽度手柄 = 选中节点的左右两条边；边的中点让给连接点。
+    if (!isSelected() || m_editing || portAt(p) >= 0)
+        return 0;
+    const QRectF b = bodyRect();
+    const qreal g = Theme::current().resizeGrip;
+    if (p.y() < b.top() || p.y() > b.bottom())
+        return 0;
+    if (qAbs(p.x() - b.left()) <= g)
+        return -1;
+    if (qAbs(p.x() - b.right()) <= g)
+        return 1;
+    return 0;
+}
+
 void NodeItem::updateEdges()
 {
     for (EdgeItem *e : qAsConst(m_edges))
@@ -220,9 +246,18 @@ void NodeItem::hoverEnterEvent(QGraphicsSceneHoverEvent *)
     update();
 }
 
+void NodeItem::hoverMoveEvent(QGraphicsSceneHoverEvent *event)
+{
+    if (gripAt(event->pos()) != 0)
+        setCursor(Qt::SizeHorCursor);
+    else
+        unsetCursor();
+}
+
 void NodeItem::hoverLeaveEvent(QGraphicsSceneHoverEvent *)
 {
     m_hover = false;
+    unsetCursor();
     update();
 }
 
@@ -236,11 +271,36 @@ void NodeItem::mousePressEvent(QGraphicsSceneMouseEvent *event)
             return;
         }
     }
+    if (event->button() == Qt::LeftButton && !(event->modifiers() & Qt::ControlModifier)) {
+        const int side = gripAt(event->pos());
+        if (side != 0) {
+            m_resizeSide = side;
+            m_resizeStart = data();
+            m_resizeStartWidth = m_size.width();
+            event->accept();
+            return;
+        }
+    }
     QGraphicsItem::mousePressEvent(event);
 }
 
 void NodeItem::mouseMoveEvent(QGraphicsSceneMouseEvent *event)
 {
+    if (m_resizeSide != 0) {
+        const qreal minW = Theme::current().nodeMinResizeWidth;
+        if (m_resizeSide > 0) {
+            m_data.w = qMax(minW, event->scenePos().x() - pos().x());
+        } else {
+            // 拖左边：右边缘保持不动。
+            const qreal right = m_resizeStart.x + m_resizeStartWidth;
+            const qreal left = qMin(event->scenePos().x(), right - minW);
+            m_data.w = right - left;
+            setPos(left, pos().y());
+        }
+        relayout();
+        event->accept();
+        return;
+    }
     if (m_linking) {
         if (CanvasScene *s = canvasScene())
             s->updateLinkDrag(event->scenePos());
@@ -252,6 +312,15 @@ void NodeItem::mouseMoveEvent(QGraphicsSceneMouseEvent *event)
 
 void NodeItem::mouseReleaseEvent(QGraphicsSceneMouseEvent *event)
 {
+    if (m_resizeSide != 0) {
+        if (event->button() == Qt::LeftButton) {
+            m_resizeSide = 0;
+            if (CanvasScene *s = canvasScene())
+                s->nodeResized(m_resizeStart, data());
+        }
+        event->accept();
+        return;
+    }
     if (m_linking) {
         if (event->button() == Qt::LeftButton) {
             m_linking = false;
@@ -283,6 +352,25 @@ void NodeItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *option, 
     const qreal h = bw / 2;
     painter->drawRoundedRect(body.adjusted(h, h, -h, -h), t.nodeRadius, t.nodeRadius);
 
+    if (!m_editing) {
+        QAbstractTextDocumentLayout::PaintContext ctx;
+        ctx.palette.setColor(QPalette::Text, t.text);
+        painter->save();
+        painter->translate(m_text->pos());
+        m_text->document()->documentLayout()->draw(painter, ctx);
+        painter->restore();
+    }
+
+    // 选中时左右两条边加粗，提示可以拖动调整宽度。
+    if (selected && !m_editing) {
+        const qreal r = t.nodeRadius;
+        painter->setPen(QPen(t.accent, 3, Qt::SolidLine, Qt::RoundCap));
+        painter->drawLine(QPointF(body.left() + 1, body.top() + r + 1),
+                          QPointF(body.left() + 1, body.bottom() - r - 1));
+        painter->drawLine(QPointF(body.right() - 1, body.top() + r + 1),
+                          QPointF(body.right() - 1, body.bottom() - r - 1));
+    }
+
     // 悬停时在四边中点显示连接点。
     if (m_hover && !m_editing) {
         painter->setPen(QPen(t.accent, 1.2));
@@ -300,7 +388,7 @@ void NodeItem::beginEdit()
     m_textBeforeEdit = m_data.text;
     update();
 
-    m_text->setCacheMode(NoCache);
+    m_text->setVisible(true);
     m_text->setAcceptedMouseButtons(Qt::LeftButton | Qt::RightButton);
     m_text->setTextInteractionFlags(Qt::TextEditorInteraction);
     m_text->setFocus(Qt::OtherFocusReason);
@@ -324,7 +412,7 @@ void NodeItem::endEdit(EditEnd how)
     m_text->setTextInteractionFlags(Qt::NoTextInteraction);
     m_text->setAcceptedMouseButtons(Qt::NoButton);
     m_text->clearFocus();
-    m_text->setCacheMode(DeviceCoordinateCache);
+    m_text->setVisible(false);
 
     m_data.text = newText;
     if (m_text->toPlainText() != newText)

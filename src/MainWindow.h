@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Document.h"
+
 #include <QWidget>
 
 class CanvasScene;
@@ -47,6 +49,8 @@ protected:
 
 private:
     void toggleMaximized();
+    void showMenu();
+    void applySettings(const DocSettings &s);   // 应用到画布并记入偏好
 
     CanvasScene *m_scene;
     CanvasView  *m_view;

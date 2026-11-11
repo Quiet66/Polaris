@@ -1,16 +1,36 @@
 #include "MainWindow.h"
 #include "CanvasScene.h"
 #include "CanvasView.h"
+#include "Prefs.h"
 #include "Theme.h"
 #include "WinNative.h"
 
 #include <QApplication>
+#include <QMenu>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QVBoxLayout>
 #include <QWindow>
 
 namespace {
+// 菜单项左侧的勾。所有菜单项都带一个同尺寸的图标（未勾选时是透明的），
+// 这样勾选项和普通项的文字能对齐；样式表下原生的勾选标记会把文字挤偏。
+QIcon checkIcon(bool on)
+{
+    const int px = 12, scale = 2;
+    QPixmap pm(px * scale, px * scale);
+    pm.setDevicePixelRatio(scale);
+    pm.fill(Qt::transparent);
+    if (on) {
+        QPainter p(&pm);
+        p.setRenderHint(QPainter::Antialiasing, true);
+        p.setPen(QPen(Theme::current().menuText, 1.6, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        const QPointF pts[] = { QPointF(2.5, 6.5), QPointF(5, 9), QPointF(9.5, 3.5) };
+        p.drawPolyline(pts, 3);
+    }
+    return QIcon(pm);
+}
+
 const int kResizeBorder = 6;    // 边缘缩放热区（设备无关像素）
 const int kButtonSize   = 22;
 const int kButtonMargin = 10;
@@ -23,7 +43,7 @@ MenuButton::MenuButton(QWidget *parent)
 {
     setFixedSize(kButtonSize, kButtonSize);
     setCursor(Qt::ArrowCursor);
-    setToolTip(QStringLiteral("拖动移动窗口，双击最大化"));
+    setToolTip(QStringLiteral("单击打开菜单，拖动移动窗口，双击最大化"));
 }
 
 void MenuButton::paintEvent(QPaintEvent *)
@@ -118,7 +138,9 @@ MainWindow::MainWindow(QWidget *parent)
             windowHandle()->startSystemMove();
     });
     connect(m_menuButton, &MenuButton::doubleClicked, this, &MainWindow::toggleMaximized);
-    // clicked() 弹出菜单：M3 实现。
+    connect(m_menuButton, &MenuButton::clicked, this, &MainWindow::showMenu);
+
+    m_scene->setSettings(Prefs::instance().docDefaults());
 
     m_view->setFocus();
     WinNative::setupFramelessWindow(this);
@@ -130,6 +152,117 @@ void MainWindow::toggleMaximized()
         showNormal();
     else
         showMaximized();
+}
+
+void MainWindow::applySettings(const DocSettings &s)
+{
+    m_scene->setSettings(s);
+    Prefs::instance().setDocDefaults(s);
+    m_view->viewport()->update();
+    m_menuButton->update();
+    update();
+}
+
+void MainWindow::showMenu()
+{
+    const Theme &t = Theme::current();
+    Prefs &prefs = Prefs::instance();
+    const DocSettings cur = m_scene->settings();
+
+    QMenu *menu = new QMenu(this);
+    menu->setAttribute(Qt::WA_DeleteOnClose);
+
+    // 圆角菜单：弹出窗口本身要透明、无系统阴影，否则四角会露出方形底。
+    auto polish = [&t](QMenu *m) {
+        m->setWindowFlags(m->windowFlags() | Qt::FramelessWindowHint | Qt::NoDropShadowWindowHint);
+        m->setAttribute(Qt::WA_TranslucentBackground);
+        m->setStyleSheet(t.menuStyleSheet());
+        m->setFont(QApplication::font());
+    };
+    polish(menu);
+
+    auto later = [menu](const QString &text, const QString &shortcut = QString()) {
+        // 后续里程碑才实现的功能：先占位并置灰。
+        QAction *a = menu->addAction(shortcut.isEmpty() ? text
+                                                        : text + QLatin1Char('\t') + shortcut);
+        a->setEnabled(false);
+        a->setIcon(checkIcon(false));
+        return a;
+    };
+    auto toggle = [](QMenu *m, const QString &text, bool on) {
+        return m->addAction(checkIcon(on), text);
+    };
+
+    later(QStringLiteral("新建"), QStringLiteral("Ctrl+N"));
+    later(QStringLiteral("打开…"), QStringLiteral("Ctrl+O"));
+    later(QStringLiteral("保存"), QStringLiteral("Ctrl+S"));
+    later(QStringLiteral("另存为…"), QStringLiteral("Ctrl+Shift+S"));
+    later(QStringLiteral("导出图片…"));
+    menu->addSeparator();
+
+    QMenu *bg = menu->addMenu(checkIcon(false), QStringLiteral("背景"));
+    polish(bg);
+    const struct { const char *key; QString label; } bgs[] = {
+        { "plain", QStringLiteral("纯色") },
+        { "dots",  QStringLiteral("点阵") },
+        { "lines", QStringLiteral("线阵") },
+    };
+    for (const auto &b : bgs) {
+        const QString key = QString::fromLatin1(b.key);
+        QAction *a = toggle(bg, b.label, cur.background == key);
+        connect(a, &QAction::triggered, this, [this, key]() {
+            DocSettings s = m_scene->settings();
+            s.background = key;
+            applySettings(s);
+        });
+    }
+
+    QMenu *th = menu->addMenu(checkIcon(false), QStringLiteral("主题"));
+    polish(th);
+    const struct { const char *key; QString label; } ths[] = {
+        { "light", QStringLiteral("浅色") },
+        { "dark",  QStringLiteral("深色") },
+    };
+    for (const auto &x : ths) {
+        const QString key = QString::fromLatin1(x.key);
+        QAction *a = toggle(th, x.label, cur.theme == key);
+        connect(a, &QAction::triggered, this, [this, key]() {
+            DocSettings s = m_scene->settings();
+            s.theme = key;
+            applySettings(s);
+        });
+    }
+
+    QAction *directed = toggle(menu, QStringLiteral("连线方向"), cur.directed);
+    connect(directed, &QAction::triggered, this, [this]() {
+        DocSettings s = m_scene->settings();
+        s.directed = !s.directed;
+        applySettings(s);
+    });
+
+    QAction *snap = toggle(menu, QStringLiteral("对齐吸附"), prefs.snapEnabled());
+    connect(snap, &QAction::triggered, this, []() {
+        Prefs::instance().setSnapEnabled(!Prefs::instance().snapEnabled());
+    });
+
+    QAction *motion = toggle(menu, QStringLiteral("精简动效"), prefs.reduceMotion());
+    connect(motion, &QAction::triggered, this, []() {
+        Prefs::instance().setReduceMotion(!Prefs::instance().reduceMotion());
+    });
+
+    menu->addSeparator();
+    later(QStringLiteral("窗口置顶"));
+    later(QStringLiteral("透明度"));
+    later(QStringLiteral("快捷键设置…"));
+    menu->addSeparator();
+
+    QAction *max = menu->addAction(checkIcon(false), isMaximized() ? QStringLiteral("还原")
+                                                                   : QStringLiteral("最大化"));
+    connect(max, &QAction::triggered, this, &MainWindow::toggleMaximized);
+    QAction *quit = menu->addAction(checkIcon(false), QStringLiteral("退出"));
+    connect(quit, &QAction::triggered, qApp, &QApplication::quit);
+
+    menu->popup(m_menuButton->mapToGlobal(QPoint(0, m_menuButton->height() + 2)));
 }
 
 bool MainWindow::nativeEvent(const QByteArray &eventType, void *message, long *result)

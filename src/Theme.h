@@ -18,6 +18,11 @@ struct Theme
     QColor accent;          // 选中等强调色
     QColor buttonFill;      // 菜单按钮
     QColor edge;            // 连线
+    QColor menuFill;
+    QColor menuBorder;
+    QColor menuHover;
+    QColor menuText;
+    QColor menuTextDisabled;
 
     qreal nodeRadius          = 6;
     qreal nodePadX            = 12;
@@ -28,6 +33,10 @@ struct Theme
     qreal nodeMinWidth        = 40;
     qreal nodeMaxWidth        = 300;    // w 为 null 时的自动换行宽度
     qreal defaultFontSize     = 11;     // pt
+    qreal minFontSize         = 6;
+    qreal maxFontSize         = 48;
+    qreal nodeMinResizeWidth  = 60;     // 拖手柄能缩到的最小宽度
+    qreal resizeGrip          = 5;      // 左右两侧宽度手柄的命中半宽
     qreal portRadius          = 4.5;    // 连接点
     qreal edgeWidth           = 1.5;
     qreal edgeActiveWidth     = 2.6;    // 悬停、选中
@@ -43,4 +52,6 @@ struct Theme
     static Theme dark();
     static const Theme &current();
     static void setCurrent(const QString &name);   // "light" / "dark"
+
+    QString menuStyleSheet() const;
 };

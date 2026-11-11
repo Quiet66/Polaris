@@ -274,6 +274,20 @@ void CanvasView::keyPressEvent(QKeyEvent *event)
             fitAll();
             event->accept();
             return;
+        case Qt::Key_Equal:
+        case Qt::Key_Plus:
+            m_scene->changeFontSize(+1);
+            event->accept();
+            return;
+        case Qt::Key_Minus:
+        case Qt::Key_Underscore:
+            m_scene->changeFontSize(-1);
+            event->accept();
+            return;
+        case Qt::Key_0:
+            m_scene->changeFontSize(0);
+            event->accept();
+            return;
         default:
             break;
         }
