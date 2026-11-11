@@ -14,10 +14,20 @@ INCLUDEPATH += src
 SOURCES += \
     src/main.cpp \
     src/MainWindow.cpp \
+    src/CanvasView.cpp \
+    src/CanvasScene.cpp \
+    src/NodeItem.cpp \
+    src/Document.cpp \
+    src/Theme.cpp \
     src/WinNative.cpp
 
 HEADERS += \
     src/MainWindow.h \
+    src/CanvasView.h \
+    src/CanvasScene.h \
+    src/NodeItem.h \
+    src/Document.h \
+    src/Theme.h \
     src/WinNative.h
 
 LIBS += -luser32

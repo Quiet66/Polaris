@@ -1,0 +1,11 @@
+build/obj/main.o
+build/obj/MainWindow.o
+build/obj/CanvasView.o
+build/obj/CanvasScene.o
+build/obj/NodeItem.o
+build/obj/Document.o
+build/obj/Theme.o
+build/obj/WinNative.o
+build/obj/moc_MainWindow.o
+build/obj/moc_CanvasView.o
+build/obj/moc_CanvasScene.o

@@ -4,6 +4,7 @@
 
 - Qt 5.15.2（仅 QtCore / QtGui / QtWidgets），32 位 MinGW 8.1，qmake。
 - 无第三方库；Win32 调用全部在 `src/WinNative.*`。
+- 颜色、圆角、间距集中在 `src/Theme.*`（SPEC 目录清单之外新增的唯一文件）。
 
 ## Windows 上构建
 
