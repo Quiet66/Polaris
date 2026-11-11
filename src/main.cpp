@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "WinNative.h"
 
 #include <QApplication>
 #include <QFont>
@@ -12,6 +13,14 @@ int main(int argc, char *argv[])
     QApplication app(argc, argv);
     QCoreApplication::setApplicationName(QStringLiteral("TrailCanvas"));
 
+    // 单实例：重复启动时唤出已有窗口，然后退出。
+    if (!WinNative::acquireSingleInstance()) {
+        WinNative::notifyExistingInstance();
+        return 0;
+    }
+    // 窗口隐藏到托盘时程序继续运行。
+    QApplication::setQuitOnLastWindowClosed(false);
+
     // 优先微软雅黑（Win7 自带）；不存在时保留系统默认字体。
     const QString yahei = QStringLiteral("Microsoft YaHei");
     if (QFontDatabase().families().contains(yahei)) {
@@ -21,7 +30,7 @@ int main(int argc, char *argv[])
     }
 
     MainWindow w;
-    w.show();
+    w.startup();
 
     // 先看有没有需要恢复的草稿；没有恢复草稿时，命令行带了文件就打开它。
     const QStringList args = QCoreApplication::arguments();

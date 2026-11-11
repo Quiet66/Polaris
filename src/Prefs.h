@@ -2,6 +2,7 @@
 
 #include "Document.h"
 
+#include <QRect>
 #include <QString>
 
 class QSettings;
@@ -24,6 +25,20 @@ public:
 
     bool reduceMotion() const;          // 精简动效（M6 生效）
     void setReduceMotion(bool on);
+
+    // 窗口状态
+    QRect windowGeometry() const;       // 无记录时为空矩形
+    void setWindowGeometry(const QRect &r);
+    bool windowMaximized() const;
+    void setWindowMaximized(bool on);
+    bool topmost() const;               // 默认置顶
+    void setTopmost(bool on);
+    qreal opacity() const;              // 0.3 ~ 1.0
+    void setOpacity(qreal v);
+
+    // 全局快捷键，按名字存取（QKeySequence 的可移植文本，空 = 不启用）。
+    QString hotkey(const QString &name, const QString &fallback) const;
+    void setHotkey(const QString &name, const QString &sequence);
 
     QString lastFile() const;           // 上次保存或打开的文件
     void setLastFile(const QString &path);

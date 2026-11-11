@@ -7,20 +7,30 @@
 #include "Theme.h"
 #include "WinNative.h"
 
+#include <functional>
+
 #include <QApplication>
 #include <QCloseEvent>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QDir>
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFormLayout>
+#include <QGuiApplication>
+#include <QKeySequenceEdit>
+#include <QLabel>
 #include <QMenu>
 #include <QMessageBox>
 #include <QShortcut>
 #include <QStandardPaths>
+#include <QSystemTrayIcon>
 #include <QTimer>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPushButton>
+#include <QScreen>
 #include <QVBoxLayout>
 #include <QWindow>
 
@@ -47,6 +57,31 @@ const int kResizeBorder = 6;    // 边缘缩放热区（设备无关像素）
 const int kButtonSize   = 22;
 const int kButtonMargin = 10;
 const int kDraftDelayMs = 2000; // 内容变化后多久写一次草稿
+
+// 全局快捷键。id 即数组下标 + 1。
+struct HotkeyDef
+{
+    const char *name;           // 偏好里的键名
+    const char *fallback;       // 默认值
+    QString     label;
+    bool        allowRepeat;    // 按住时是否连续触发
+};
+
+const QVector<HotkeyDef> &hotkeyDefs()
+{
+    static const QVector<HotkeyDef> defs = {
+        { "toggle",      "Ctrl+Alt+Space", QStringLiteral("隐藏 / 唤出窗口"), false },
+        { "topmost",     "Ctrl+Alt+T",     QStringLiteral("切换置顶"),        false },
+        { "opacityUp",   "Ctrl+Alt+Up",    QStringLiteral("提高不透明度"),    true  },
+        { "opacityDown", "Ctrl+Alt+Down",  QStringLiteral("降低不透明度"),    true  },
+    };
+    return defs;
+}
+
+QString hotkeyValue(const HotkeyDef &d)
+{
+    return Prefs::instance().hotkey(QString::fromLatin1(d.name), QString::fromLatin1(d.fallback));
+}
 }
 
 // ------------------------------------------------------------------ MenuButton
@@ -138,6 +173,7 @@ MainWindow::MainWindow(QWidget *parent)
 {
     setWindowFlags(Qt::Window | Qt::FramelessWindowHint);
     setWindowTitle(QStringLiteral("TrailCanvas"));
+    setWindowIcon(QIcon(QStringLiteral(":/icon.png")));
     setMinimumSize(240, 160);
     resize(900, 600);
 
@@ -176,6 +212,244 @@ MainWindow::MainWindow(QWidget *parent)
 
     m_view->setFocus();
     WinNative::setupFramelessWindow(this);
+
+    restoreWindowState();
+    setupTray();
+}
+
+// -------------------------------------------------------------- 窗口与系统集成
+
+void MainWindow::restoreWindowState()
+{
+    Prefs &prefs = Prefs::instance();
+
+    // 恢复位置和大小前，确认它仍然落在某块屏幕上（显示器可能已经拔掉或换了分辨率）。
+    const QRect saved = prefs.windowGeometry();
+    if (saved.isValid()) {
+        bool visible = false;
+        const QList<QScreen *> screens = QGuiApplication::screens();
+        for (QScreen *sc : screens) {
+            const QRect hit = sc->availableGeometry().intersected(saved);
+            if (hit.width() >= 100 && hit.height() >= 60) {
+                visible = true;
+                break;
+            }
+        }
+        if (visible) {
+            setGeometry(saved);
+        } else if (QScreen *primary = QGuiApplication::primaryScreen()) {
+            // 位置已经不在任何屏幕内：保留大小（不超过屏幕），居中显示。
+            const QRect avail = primary->availableGeometry();
+            const QSize size = saved.size().boundedTo(avail.size());
+            setGeometry(QRect(avail.center() - QPoint(size.width() / 2, size.height() / 2), size));
+        }
+    }
+    setWindowOpacity(prefs.opacity());
+    WinNative::setTopmost(this, prefs.topmost());
+}
+
+void MainWindow::saveWindowState()
+{
+    Prefs &prefs = Prefs::instance();
+    // 最大化时记录还原后的大小，下次取消最大化能回到原来的位置。
+    prefs.setWindowGeometry(isMaximized() ? normalGeometry() : geometry());
+    prefs.setWindowMaximized(isMaximized());
+}
+
+void MainWindow::setupTray()
+{
+    if (!QSystemTrayIcon::isSystemTrayAvailable())
+        return;         // 没有托盘时，关闭窗口就是退出
+
+    m_tray = new QSystemTrayIcon(windowIcon(), this);
+    m_tray->setToolTip(QStringLiteral("TrailCanvas"));
+
+    // 右键菜单与左上角按钮的菜单内容相同；每次弹出前重建，保证勾选状态是最新的。
+    m_trayMenu = new QMenu(this);
+    polishMenu(m_trayMenu);
+    connect(m_trayMenu, &QMenu::aboutToShow, this, [this]() {
+        m_trayMenu->clear();
+        qDeleteAll(m_trayMenu->findChildren<QMenu *>(QString(), Qt::FindDirectChildrenOnly));
+        populateMenu(m_trayMenu);
+    });
+    populateMenu(m_trayMenu);
+    m_tray->setContextMenu(m_trayMenu);
+
+    connect(m_tray, &QSystemTrayIcon::activated, this,
+            [this](QSystemTrayIcon::ActivationReason reason) {
+        if (reason == QSystemTrayIcon::Trigger)     // 左键单击切换显示
+            toggleVisible();
+    });
+    m_tray->show();
+}
+
+void MainWindow::startup()
+{
+    if (Prefs::instance().windowMaximized())
+        showMaximized();
+    else
+        show();
+    WinNative::setTopmost(this, Prefs::instance().topmost());
+    reportHotkeyFailures(registerHotkeys());
+}
+
+void MainWindow::toggleVisible()
+{
+    if (isVisible() && !isMinimized())
+        hideToTray();
+    else
+        showFromTray();
+}
+
+void MainWindow::hideToTray()
+{
+    m_scene->commitEditing();
+    saveWindowState();
+    hide();
+}
+
+void MainWindow::showFromTray()
+{
+    if (isMinimized())
+        setWindowState(windowState() & ~Qt::WindowMinimized);
+    show();
+    WinNative::bringToFront(this);
+    m_view->setFocus();
+}
+
+void MainWindow::setTopmost(bool on)
+{
+    WinNative::setTopmost(this, on);
+    Prefs::instance().setTopmost(on);
+}
+
+void MainWindow::setOpacityLevel(qreal v)
+{
+    v = qBound(0.3, qRound(v * 10) / 10.0, 1.0);    // 30% ~ 100%，按 10% 取整
+    setWindowOpacity(v);
+    Prefs::instance().setOpacity(v);
+}
+
+QStringList MainWindow::registerHotkeys()
+{
+    QStringList failed;
+    const QVector<HotkeyDef> &defs = hotkeyDefs();
+    for (int i = 0; i < defs.size(); ++i) {
+        const int id = i + 1;
+        WinNative::unregisterHotkey(this, id);
+
+        const QString text = hotkeyValue(defs[i]);
+        const QKeySequence seq(text, QKeySequence::PortableText);
+        if (seq.isEmpty())
+            continue;               // 留空 = 不启用
+        const int combined = seq[0];
+        const Qt::KeyboardModifiers mods = Qt::KeyboardModifiers(combined & Qt::KeyboardModifierMask);
+        const int key = combined & ~Qt::KeyboardModifierMask;
+        if (!WinNative::registerHotkey(this, id, key, mods, defs[i].allowRepeat)) {
+            failed << QStringLiteral("%1（%2）").arg(defs[i].label,
+                                                    seq.toString(QKeySequence::NativeText));
+        }
+    }
+    return failed;
+}
+
+void MainWindow::reportHotkeyFailures(const QStringList &failed)
+{
+    if (failed.isEmpty())
+        return;
+    const QString msg = QStringLiteral("以下全局快捷键注册失败，可能已被其他程序占用：\n%1\n"
+                                       "可以在菜单的“快捷键设置”里改用别的组合。")
+                            .arg(failed.join(QLatin1Char('\n')));
+    if (m_tray)
+        m_tray->showMessage(QStringLiteral("TrailCanvas"), msg, QSystemTrayIcon::Warning, 8000);
+    else
+        QMessageBox::warning(this, QStringLiteral("TrailCanvas"), msg);
+}
+
+void MainWindow::onHotkey(int id)
+{
+    switch (id) {
+    case 1: toggleVisible(); break;
+    case 2: setTopmost(!Prefs::instance().topmost()); break;
+    case 3: setOpacityLevel(windowOpacity() + 0.1); break;
+    case 4: setOpacityLevel(windowOpacity() - 0.1); break;
+    default: break;
+    }
+}
+
+void MainWindow::showHotkeyDialog()
+{
+    const QVector<HotkeyDef> &defs = hotkeyDefs();
+
+    QDialog dlg(this);
+    dlg.setWindowTitle(QStringLiteral("快捷键设置"));
+    dlg.setWindowFlags(dlg.windowFlags() & ~Qt::WindowContextHelpButtonHint);
+
+    QFormLayout *form = new QFormLayout;
+    QVector<QKeySequenceEdit *> edits;
+    for (const HotkeyDef &d : defs) {
+        QKeySequenceEdit *e = new QKeySequenceEdit(
+            QKeySequence(hotkeyValue(d), QKeySequence::PortableText), &dlg);
+        form->addRow(d.label, e);
+        edits.append(e);
+    }
+
+    QDialogButtonBox *buttons = new QDialogButtonBox(&dlg);
+    buttons->addButton(QStringLiteral("确定"), QDialogButtonBox::AcceptRole);
+    buttons->addButton(QStringLiteral("取消"), QDialogButtonBox::RejectRole);
+    QPushButton *reset = buttons->addButton(QStringLiteral("恢复默认"), QDialogButtonBox::ResetRole);
+    connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+    connect(reset, &QPushButton::clicked, &dlg, [&]() {
+        for (int i = 0; i < defs.size(); ++i)
+            edits[i]->setKeySequence(QKeySequence(QString::fromLatin1(defs[i].fallback),
+                                                  QKeySequence::PortableText));
+    });
+
+    QLabel *hint = new QLabel(QStringLiteral("点一下输入框再按下组合键；清空表示不启用。"), &dlg);
+    QVBoxLayout *layout = new QVBoxLayout(&dlg);
+    layout->addWidget(hint);
+    layout->addLayout(form);
+    layout->addWidget(buttons);
+
+    // 设置期间先注销，否则按下当前的组合键会直接触发功能而录不进去。
+    for (int i = 0; i < defs.size(); ++i)
+        WinNative::unregisterHotkey(this, i + 1);
+
+    if (dlg.exec() == QDialog::Accepted) {
+        for (int i = 0; i < defs.size(); ++i) {
+            // 全局快捷键只取一个组合键。
+            const QKeySequence seq = edits[i]->keySequence();
+            const QString text = seq.isEmpty() ? QString()
+                                               : QKeySequence(seq[0]).toString(QKeySequence::PortableText);
+            Prefs::instance().setHotkey(QString::fromLatin1(defs[i].name), text);
+        }
+    }
+    const QStringList failed = registerHotkeys();
+    if (!failed.isEmpty()) {
+        QMessageBox::warning(this, QStringLiteral("TrailCanvas"),
+                             QStringLiteral("以下全局快捷键注册失败，可能已被其他程序占用：\n%1")
+                                 .arg(failed.join(QLatin1Char('\n'))));
+    }
+}
+
+void MainWindow::quitApp()
+{
+    if (m_dirty && !isVisible())
+        showFromTray();         // 让"要保存吗"的提示有个着落
+    if (!maybeSave())
+        return;
+    if (isVisible())
+        saveWindowState();
+    m_quitting = true;
+
+    // 收尾顺序：先隐藏主窗口，再注销快捷键、撤掉托盘图标，最后退出事件循环。
+    hide();
+    for (int i = 0; i < hotkeyDefs().size(); ++i)
+        WinNative::unregisterHotkey(this, i + 1);
+    if (m_tray)
+        m_tray->hide();
+    QApplication::quit();
 }
 
 void MainWindow::toggleMaximized()
@@ -196,55 +470,53 @@ void MainWindow::applySettings(const DocSettings &s)
     update();
 }
 
+void MainWindow::polishMenu(QMenu *menu) const
+{
+    // 圆角菜单：弹出窗口本身要透明、无系统阴影，否则四角会露出方形底。
+    menu->setWindowFlags(menu->windowFlags() | Qt::FramelessWindowHint | Qt::NoDropShadowWindowHint);
+    menu->setAttribute(Qt::WA_TranslucentBackground);
+    menu->setStyleSheet(Theme::current().menuStyleSheet());
+    menu->setFont(QApplication::font());
+}
+
 void MainWindow::showMenu()
 {
-    const Theme &t = Theme::current();
-    Prefs &prefs = Prefs::instance();
-    const DocSettings cur = m_scene->settings();
-
     QMenu *menu = new QMenu(this);
     menu->setAttribute(Qt::WA_DeleteOnClose);
+    populateMenu(menu);
+    menu->popup(m_menuButton->mapToGlobal(QPoint(0, m_menuButton->height() + 2)));
+}
 
-    // 圆角菜单：弹出窗口本身要透明、无系统阴影，否则四角会露出方形底。
-    auto polish = [&t](QMenu *m) {
-        m->setWindowFlags(m->windowFlags() | Qt::FramelessWindowHint | Qt::NoDropShadowWindowHint);
-        m->setAttribute(Qt::WA_TranslucentBackground);
-        m->setStyleSheet(t.menuStyleSheet());
-        m->setFont(QApplication::font());
-    };
-    polish(menu);
+void MainWindow::populateMenu(QMenu *menu)
+{
+    Prefs &prefs = Prefs::instance();
+    const DocSettings cur = m_scene->settings();
+    polishMenu(menu);       // 主题可能变了，每次都重设样式
 
-    auto later = [menu](const QString &text, const QString &shortcut = QString()) {
-        // 后续里程碑才实现的功能：先占位并置灰。
-        QAction *a = menu->addAction(shortcut.isEmpty() ? text
-                                                        : text + QLatin1Char('\t') + shortcut);
-        a->setEnabled(false);
-        a->setIcon(checkIcon(false));
-        return a;
+    auto item = [](QMenu *m, const QString &text, bool checked = false,
+                   const QString &shortcut = QString()) {
+        return m->addAction(checkIcon(checked),
+                            shortcut.isEmpty() ? text : text + QLatin1Char('\t') + shortcut);
     };
-    auto toggle = [](QMenu *m, const QString &text, bool on) {
-        return m->addAction(checkIcon(on), text);
+    auto submenu = [this](QMenu *parent, const QString &text) {
+        QMenu *m = parent->addMenu(checkIcon(false), text);
+        polishMenu(m);
+        return m;
+    };
+    // 菜单关闭后再执行（QueuedConnection）：对话框不要从正在关闭的弹出菜单里打开。
+    auto run = [this](QAction *a, std::function<void()> fn) {
+        connect(a, &QAction::triggered, this, fn, Qt::QueuedConnection);
     };
 
-    auto item = [menu](const QString &text, const QString &shortcut = QString()) {
-        return menu->addAction(checkIcon(false),
-                               shortcut.isEmpty() ? text : text + QLatin1Char('\t') + shortcut);
-    };
-    // 菜单关闭后再执行：文件对话框不要从正在关闭的弹出菜单里打开。
-    connect(item(QStringLiteral("新建"), QStringLiteral("Ctrl+N")), &QAction::triggered, this,
-            &MainWindow::newDocument, Qt::QueuedConnection);
-    connect(item(QStringLiteral("打开…"), QStringLiteral("Ctrl+O")), &QAction::triggered, this,
-            &MainWindow::openDocument, Qt::QueuedConnection);
-    connect(item(QStringLiteral("保存"), QStringLiteral("Ctrl+S")), &QAction::triggered, this,
-            [this]() { saveDocument(); }, Qt::QueuedConnection);
-    connect(item(QStringLiteral("另存为…"), QStringLiteral("Ctrl+Shift+S")), &QAction::triggered,
-            this, [this]() { saveDocumentAs(); }, Qt::QueuedConnection);
-    connect(item(QStringLiteral("导出图片…")), &QAction::triggered, this,
-            &MainWindow::exportImage, Qt::QueuedConnection);
+    run(item(menu, QStringLiteral("新建"), false, QStringLiteral("Ctrl+N")), [this]() { newDocument(); });
+    run(item(menu, QStringLiteral("打开…"), false, QStringLiteral("Ctrl+O")), [this]() { openDocument(); });
+    run(item(menu, QStringLiteral("保存"), false, QStringLiteral("Ctrl+S")), [this]() { saveDocument(); });
+    run(item(menu, QStringLiteral("另存为…"), false, QStringLiteral("Ctrl+Shift+S")),
+        [this]() { saveDocumentAs(); });
+    run(item(menu, QStringLiteral("导出图片…")), [this]() { exportImage(); });
     menu->addSeparator();
 
-    QMenu *bg = menu->addMenu(checkIcon(false), QStringLiteral("背景"));
-    polish(bg);
+    QMenu *bg = submenu(menu, QStringLiteral("背景"));
     const struct { const char *key; QString label; } bgs[] = {
         { "plain", QStringLiteral("纯色") },
         { "dots",  QStringLiteral("点阵") },
@@ -252,60 +524,64 @@ void MainWindow::showMenu()
     };
     for (const auto &b : bgs) {
         const QString key = QString::fromLatin1(b.key);
-        QAction *a = toggle(bg, b.label, cur.background == key);
-        connect(a, &QAction::triggered, this, [this, key]() {
+        run(item(bg, b.label, cur.background == key), [this, key]() {
             DocSettings s = m_scene->settings();
             s.background = key;
             applySettings(s);
         });
     }
 
-    QMenu *th = menu->addMenu(checkIcon(false), QStringLiteral("主题"));
-    polish(th);
+    QMenu *th = submenu(menu, QStringLiteral("主题"));
     const struct { const char *key; QString label; } ths[] = {
         { "light", QStringLiteral("浅色") },
         { "dark",  QStringLiteral("深色") },
     };
     for (const auto &x : ths) {
         const QString key = QString::fromLatin1(x.key);
-        QAction *a = toggle(th, x.label, cur.theme == key);
-        connect(a, &QAction::triggered, this, [this, key]() {
+        run(item(th, x.label, cur.theme == key), [this, key]() {
             DocSettings s = m_scene->settings();
             s.theme = key;
             applySettings(s);
         });
     }
 
-    QAction *directed = toggle(menu, QStringLiteral("连线方向"), cur.directed);
-    connect(directed, &QAction::triggered, this, [this]() {
+    run(item(menu, QStringLiteral("连线方向"), cur.directed), [this]() {
         DocSettings s = m_scene->settings();
         s.directed = !s.directed;
         applySettings(s);
     });
-
-    QAction *snap = toggle(menu, QStringLiteral("对齐吸附"), prefs.snapEnabled());
-    connect(snap, &QAction::triggered, this, []() {
+    run(item(menu, QStringLiteral("对齐吸附"), prefs.snapEnabled()), []() {
         Prefs::instance().setSnapEnabled(!Prefs::instance().snapEnabled());
     });
-
-    QAction *motion = toggle(menu, QStringLiteral("精简动效"), prefs.reduceMotion());
-    connect(motion, &QAction::triggered, this, []() {
+    run(item(menu, QStringLiteral("精简动效"), prefs.reduceMotion()), []() {
         Prefs::instance().setReduceMotion(!Prefs::instance().reduceMotion());
     });
-
-    menu->addSeparator();
-    later(QStringLiteral("窗口置顶"));
-    later(QStringLiteral("透明度"));
-    later(QStringLiteral("快捷键设置…"));
     menu->addSeparator();
 
-    QAction *max = menu->addAction(checkIcon(false), isMaximized() ? QStringLiteral("还原")
-                                                                   : QStringLiteral("最大化"));
-    connect(max, &QAction::triggered, this, &MainWindow::toggleMaximized);
-    QAction *quit = menu->addAction(checkIcon(false), QStringLiteral("退出"));
-    connect(quit, &QAction::triggered, this, &QWidget::close, Qt::QueuedConnection);
+    run(item(menu, QStringLiteral("窗口置顶"), prefs.topmost()),
+        [this]() { setTopmost(!Prefs::instance().topmost()); });
 
-    menu->popup(m_menuButton->mapToGlobal(QPoint(0, m_menuButton->height() + 2)));
+    QMenu *op = submenu(menu, QStringLiteral("透明度"));
+    const int current = qRound(windowOpacity() * 10);
+    for (int level = 10; level >= 3; --level) {
+        run(item(op, QStringLiteral("%1%").arg(level * 10), level == current),
+            [this, level]() { setOpacityLevel(level / 10.0); });
+    }
+
+    run(item(menu, QStringLiteral("快捷键设置…")), [this]() { showHotkeyDialog(); });
+    menu->addSeparator();
+
+    if (m_tray) {
+        run(item(menu, isVisible() ? QStringLiteral("隐藏窗口") : QStringLiteral("显示窗口")),
+            [this]() { toggleVisible(); });
+    }
+    run(item(menu, isMaximized() ? QStringLiteral("还原") : QStringLiteral("最大化")),
+        [this]() {
+            if (!isVisible())
+                showFromTray();
+            toggleMaximized();
+        });
+    run(item(menu, QStringLiteral("退出")), [this]() { quitApp(); });
 }
 
 // -------------------------------------------------------------------- 文件操作
@@ -546,16 +822,31 @@ bool MainWindow::checkDraftOnStartup()
 
 void MainWindow::closeEvent(QCloseEvent *event)
 {
-    if (maybeSave())
-        event->accept();
-    else
+    // 关闭窗口（Alt+F4）只是隐藏到托盘；真正退出走菜单里的"退出"。
+    if (m_tray && !m_quitting) {
+        hideToTray();
         event->ignore();
+        return;
+    }
+    if (m_quitting) {
+        event->accept();
+        return;
+    }
+    // 没有托盘可用：关闭就是退出。
+    event->ignore();
+    quitApp();
 }
 
 bool MainWindow::nativeEvent(const QByteArray &eventType, void *message, long *result)
 {
-    if (WinNative::handleNativeEvent(this, eventType, message, result, kResizeBorder))
+    WinNative::Events ev;
+    if (WinNative::handleNativeEvent(this, eventType, message, result, kResizeBorder, &ev)) {
+        if (ev.hotkeyId >= 0)
+            onHotkey(ev.hotkeyId);
+        if (ev.activateRequest)
+            showFromTray();
         return true;
+    }
     return QWidget::nativeEvent(eventType, message, result);
 }
 

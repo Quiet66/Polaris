@@ -40,6 +40,9 @@ HEADERS += \
     src/Prefs.h \
     src/WinNative.h
 
+RESOURCES += resources.qrc
+RC_ICONS   = assets/app.ico
+
 LIBS += -luser32
 
 DESTDIR     = build/bin

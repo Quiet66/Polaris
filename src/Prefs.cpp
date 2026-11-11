@@ -132,3 +132,57 @@ void Prefs::setDraftSource(const QString &path)
     m_settings->setValue(K("file/draftSource"), path);
     m_settings->sync();
 }
+
+QRect Prefs::windowGeometry() const
+{
+    return m_settings->value(K("window/geometry")).toRect();
+}
+
+void Prefs::setWindowGeometry(const QRect &r)
+{
+    m_settings->setValue(K("window/geometry"), r);
+}
+
+bool Prefs::windowMaximized() const
+{
+    return m_settings->value(K("window/maximized"), false).toBool();
+}
+
+void Prefs::setWindowMaximized(bool on)
+{
+    m_settings->setValue(K("window/maximized"), on);
+    m_settings->sync();
+}
+
+bool Prefs::topmost() const
+{
+    return m_settings->value(K("window/topmost"), true).toBool();
+}
+
+void Prefs::setTopmost(bool on)
+{
+    m_settings->setValue(K("window/topmost"), on);
+    m_settings->sync();
+}
+
+qreal Prefs::opacity() const
+{
+    return qBound(0.3, m_settings->value(K("window/opacity"), 1.0).toDouble(), 1.0);
+}
+
+void Prefs::setOpacity(qreal v)
+{
+    m_settings->setValue(K("window/opacity"), qBound(0.3, v, 1.0));
+    m_settings->sync();
+}
+
+QString Prefs::hotkey(const QString &name, const QString &fallback) const
+{
+    return m_settings->value(QStringLiteral("hotkey/") + name, fallback).toString();
+}
+
+void Prefs::setHotkey(const QString &name, const QString &sequence)
+{
+    m_settings->setValue(QStringLiteral("hotkey/") + name, sequence);
+    m_settings->sync();
+}

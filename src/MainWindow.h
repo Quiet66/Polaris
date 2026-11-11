@@ -6,6 +6,8 @@
 
 class CanvasScene;
 class CanvasView;
+class QMenu;
+class QSystemTrayIcon;
 class QTimer;
 
 // 画布左上角的小圆形按钮：平时半透明，悬停时显现。
@@ -45,6 +47,7 @@ public:
     explicit MainWindow(QWidget *parent = nullptr);
 
     bool openFile(const QString &path);     // 失败时弹出提示并返回 false
+    void startup();                         // 显示窗口后调用：注册快捷键并提示冲突
     bool checkDraftOnStartup();             // 有比上次保存更新的草稿时询问；返回是否恢复了草稿
 
 protected:
@@ -52,7 +55,27 @@ protected:
     void paintEvent(QPaintEvent *event) override;
     void closeEvent(QCloseEvent *event) override;
 
+
 private:
+    // 菜单（左上角按钮和托盘右键共用同一套内容）
+    void populateMenu(QMenu *menu);
+    void polishMenu(QMenu *menu) const;
+
+    // 窗口与系统集成
+    void setupTray();
+    void restoreWindowState();
+    void saveWindowState();
+    void toggleVisible();
+    void hideToTray();
+    void showFromTray();
+    void setTopmost(bool on);
+    void setOpacityLevel(qreal v);
+    QStringList registerHotkeys();          // 返回注册失败的快捷键说明
+    void reportHotkeyFailures(const QStringList &failed);
+    void onHotkey(int id);
+    void showHotkeyDialog();
+    void quitApp();                         // 真正退出（关闭窗口只是隐藏到托盘）
+
     // 文件操作
     void newDocument();
     void openDocument();
@@ -79,4 +102,7 @@ private:
     QTimer      *m_draftTimer;
     QString      m_filePath;                // 空 = 未命名
     bool         m_dirty = false;
+    QSystemTrayIcon *m_tray = nullptr;
+    QMenu       *m_trayMenu = nullptr;
+    bool         m_quitting = false;
 };
