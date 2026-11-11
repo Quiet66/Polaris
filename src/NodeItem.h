@@ -6,6 +6,7 @@
 #include <QGraphicsTextItem>
 
 class CanvasScene;
+class EdgeItem;
 class NodeItem;
 
 // 节点内的文字。平时只显示，不接收鼠标；编辑时切换为 TextEditorInteraction。
@@ -15,6 +16,7 @@ public:
     explicit NodeTextItem(NodeItem *owner);
 
 protected:
+    bool sceneEvent(QEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
     void inputMethodEvent(QInputMethodEvent *event) override;
     void focusOutEvent(QFocusEvent *event) override;
@@ -43,6 +45,12 @@ public:
     QString  text() const { return m_data.text; }
     void     setText(const QString &text);
     QRectF   bodyRect() const { return QRectF(QPointF(0, 0), m_size); }
+    QRectF   sceneBodyRect() const { return QRectF(pos(), m_size); }
+
+    // 与本节点相连的线，由 CanvasScene 在增删连线时维护。
+    const QList<EdgeItem *> &edges() const { return m_edges; }
+    void attachEdge(EdgeItem *e) { m_edges.append(e); }
+    void detachEdge(EdgeItem *e) { m_edges.removeAll(e); }
 
     bool isEditing() const { return m_editing; }
     void beginEdit();
@@ -51,10 +59,23 @@ public:
     void relayout();        // 文字、字号、宽度或主题变化后重新计算尺寸
 
 protected:
+    QVariant itemChange(GraphicsItemChange change, const QVariant &value) override;
+    void hoverEnterEvent(QGraphicsSceneHoverEvent *event) override;
+    void hoverLeaveEvent(QGraphicsSceneHoverEvent *event) override;
+    void mousePressEvent(QGraphicsSceneMouseEvent *event) override;
+    void mouseMoveEvent(QGraphicsSceneMouseEvent *event) override;
+    void mouseReleaseEvent(QGraphicsSceneMouseEvent *event) override;
     void mouseDoubleClickEvent(QGraphicsSceneMouseEvent *event) override;
 
 private:
     CanvasScene *canvasScene() const;
+    QPointF portCenter(int index) const;        // 0 右 1 下 2 左 3 上
+    int     portAt(const QPointF &localPos) const;
+    void    updateEdges();
+
+    QList<EdgeItem *> m_edges;
+    bool          m_hover = false;
+    bool          m_linking = false;            // 正从连接点拖出连线
 
     NodeData      m_data;
     NodeTextItem *m_text;

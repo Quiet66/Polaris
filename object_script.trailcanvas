@@ -3,6 +3,8 @@ build/obj/MainWindow.o
 build/obj/CanvasView.o
 build/obj/CanvasScene.o
 build/obj/NodeItem.o
+build/obj/EdgeItem.o
+build/obj/Commands.o
 build/obj/Document.o
 build/obj/Theme.o
 build/obj/WinNative.o

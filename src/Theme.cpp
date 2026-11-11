@@ -21,6 +21,7 @@ Theme Theme::light()
     t.text         = QColor(0x2B, 0x2B, 0x2B);
     t.accent       = QColor(0x3B, 0x82, 0xF6);
     t.buttonFill   = QColor(0x55, 0x55, 0x55);
+    t.edge         = QColor(0x8C, 0x8C, 0x86);
     return t;
 }
 
@@ -37,6 +38,7 @@ Theme Theme::dark()
     t.text         = QColor(0xE6, 0xE6, 0xE3);
     t.accent       = QColor(0x60, 0xA5, 0xFA);
     t.buttonFill   = QColor(0xC8, 0xC8, 0xC8);
+    t.edge         = QColor(0x8A, 0x8D, 0x93);
     return t;
 }
 

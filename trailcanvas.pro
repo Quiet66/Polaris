@@ -17,6 +17,8 @@ SOURCES += \
     src/CanvasView.cpp \
     src/CanvasScene.cpp \
     src/NodeItem.cpp \
+    src/EdgeItem.cpp \
+    src/Commands.cpp \
     src/Document.cpp \
     src/Theme.cpp \
     src/WinNative.cpp
@@ -26,6 +28,8 @@ HEADERS += \
     src/CanvasView.h \
     src/CanvasScene.h \
     src/NodeItem.h \
+    src/EdgeItem.h \
+    src/Commands.h \
     src/Document.h \
     src/Theme.h \
     src/WinNative.h

@@ -1,5 +1,6 @@
 #include "NodeItem.h"
 #include "CanvasScene.h"
+#include "EdgeItem.h"
 #include "Theme.h"
 
 #include <QApplication>
@@ -37,6 +38,19 @@ void NodeTextItem::inputMethodEvent(QInputMethodEvent *event)
 {
     m_composing = !event->preeditString().isEmpty();
     QGraphicsTextItem::inputMethodEvent(event);
+}
+
+bool NodeTextItem::sceneEvent(QEvent *event)
+{
+    // QGraphicsTextItem::sceneEvent 会绕过 keyPressEvent 直接把 Tab 插入文本，这里拦下来。
+    if (event->type() == QEvent::KeyPress) {
+        QKeyEvent *k = static_cast<QKeyEvent *>(event);
+        if (k->key() == Qt::Key_Tab || k->key() == Qt::Key_Backtab) {
+            keyPressEvent(k);
+            return true;
+        }
+    }
+    return QGraphicsTextItem::sceneEvent(event);
 }
 
 void NodeTextItem::keyPressEvent(QKeyEvent *event)
@@ -87,6 +101,7 @@ NodeItem::NodeItem(const NodeData &data)
     , m_text(new NodeTextItem(this))
 {
     setFlags(ItemIsSelectable | ItemIsMovable | ItemSendsGeometryChanges);
+    setAcceptHoverEvents(true);
     setCacheMode(DeviceCoordinateCache);
     setPos(data.x, data.y);
     m_text->setPlainText(data.text);
@@ -139,6 +154,7 @@ void NodeItem::relayout()
     if (size != m_size) {
         prepareGeometryChange();
         m_size = size;
+        updateEdges();
     }
     m_text->setPos(t.nodePadX, t.nodePadY);
     update();
@@ -146,16 +162,106 @@ void NodeItem::relayout()
 
 QRectF NodeItem::boundingRect() const
 {
-    const qreal so = Theme::current().nodeShadowOffset;
-    return bodyRect().adjusted(-2, -2, so + 2, so + 2);
+    const Theme &t = Theme::current();
+    const qreal m = qMax<qreal>(2, t.portRadius + 1.5);     // 连接点有一半露在矩形外
+    return bodyRect().adjusted(-m, -m, m, qMax(m, t.nodeShadowOffset + 2));
 }
 
 QPainterPath NodeItem::shape() const
 {
+    // 形状始终包含四个连接点，这样光标移到连接点露在外面的那一半时仍算悬停在节点上。
+    const Theme &t = Theme::current();
     QPainterPath p;
-    const qreal r = Theme::current().nodeRadius;
-    p.addRoundedRect(bodyRect(), r, r);
+    p.setFillRule(Qt::WindingFill);
+    p.addRoundedRect(bodyRect(), t.nodeRadius, t.nodeRadius);
+    for (int i = 0; i < 4; ++i)
+        p.addEllipse(portCenter(i), t.portRadius + 1, t.portRadius + 1);
     return p;
+}
+
+QPointF NodeItem::portCenter(int index) const
+{
+    const QRectF b = bodyRect();
+    switch (index) {
+    case 0:  return QPointF(b.right(), b.center().y());
+    case 1:  return QPointF(b.center().x(), b.bottom());
+    case 2:  return QPointF(b.left(), b.center().y());
+    default: return QPointF(b.center().x(), b.top());
+    }
+}
+
+int NodeItem::portAt(const QPointF &p) const
+{
+    const qreal r = Theme::current().portRadius + 2.5;      // 命中范围比可见圆点略大
+    for (int i = 0; i < 4; ++i) {
+        const QPointF d = p - portCenter(i);
+        if (d.x() * d.x() + d.y() * d.y() <= r * r)
+            return i;
+    }
+    return -1;
+}
+
+void NodeItem::updateEdges()
+{
+    for (EdgeItem *e : qAsConst(m_edges))
+        e->updateGeometry();
+}
+
+QVariant NodeItem::itemChange(GraphicsItemChange change, const QVariant &value)
+{
+    if (change == ItemPositionHasChanged)
+        updateEdges();
+    return QGraphicsItem::itemChange(change, value);
+}
+
+void NodeItem::hoverEnterEvent(QGraphicsSceneHoverEvent *)
+{
+    m_hover = true;
+    update();
+}
+
+void NodeItem::hoverLeaveEvent(QGraphicsSceneHoverEvent *)
+{
+    m_hover = false;
+    update();
+}
+
+void NodeItem::mousePressEvent(QGraphicsSceneMouseEvent *event)
+{
+    if (event->button() == Qt::LeftButton && !m_editing && portAt(event->pos()) >= 0) {
+        if (CanvasScene *s = canvasScene()) {
+            m_linking = true;
+            s->beginLinkDrag(this, event->scenePos());
+            event->accept();
+            return;
+        }
+    }
+    QGraphicsItem::mousePressEvent(event);
+}
+
+void NodeItem::mouseMoveEvent(QGraphicsSceneMouseEvent *event)
+{
+    if (m_linking) {
+        if (CanvasScene *s = canvasScene())
+            s->updateLinkDrag(event->scenePos());
+        event->accept();
+        return;
+    }
+    QGraphicsItem::mouseMoveEvent(event);
+}
+
+void NodeItem::mouseReleaseEvent(QGraphicsSceneMouseEvent *event)
+{
+    if (m_linking) {
+        if (event->button() == Qt::LeftButton) {
+            m_linking = false;
+            if (CanvasScene *s = canvasScene())
+                s->endLinkDrag(event->scenePos());
+        }
+        event->accept();
+        return;
+    }
+    QGraphicsItem::mouseReleaseEvent(event);
 }
 
 void NodeItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *)
@@ -176,6 +282,14 @@ void NodeItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *option, 
     painter->setBrush(t.nodeFill);
     const qreal h = bw / 2;
     painter->drawRoundedRect(body.adjusted(h, h, -h, -h), t.nodeRadius, t.nodeRadius);
+
+    // 悬停时在四边中点显示连接点。
+    if (m_hover && !m_editing) {
+        painter->setPen(QPen(t.accent, 1.2));
+        painter->setBrush(t.nodeFill);
+        for (int i = 0; i < 4; ++i)
+            painter->drawEllipse(portCenter(i), t.portRadius, t.portRadius);
+    }
 }
 
 void NodeItem::beginEdit()
@@ -184,6 +298,7 @@ void NodeItem::beginEdit()
         return;
     m_editing = true;
     m_textBeforeEdit = m_data.text;
+    update();
 
     m_text->setCacheMode(NoCache);
     m_text->setAcceptedMouseButtons(Qt::LeftButton | Qt::RightButton);

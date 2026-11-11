@@ -1,10 +1,12 @@
 #include "CanvasView.h"
 #include "CanvasScene.h"
+#include "EdgeItem.h"
 #include "Theme.h"
 
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QScrollBar>
+#include <QUndoStack>
 #include <QVarLengthArray>
 #include <QWheelEvent>
 #include <QtMath>
@@ -27,8 +29,21 @@ CanvasView::CanvasView(CanvasScene *scene, QWidget *parent)
 
     setTransformationAnchor(NoAnchor);      // 缩放锚点自行处理
     setResizeAnchor(NoAnchor);
-    setDragMode(NoDrag);
+    setDragMode(RubberBandDrag);            // 在空白处拖动 = 框选
     setFocusPolicy(Qt::StrongFocus);
+
+    // 框选只选节点：橡皮筋扫过的连线不参与选择。
+    connect(m_scene, &QGraphicsScene::selectionChanged, this, [this]() {
+        if (!m_rubberBanding || m_filteringSelection)
+            return;
+        m_filteringSelection = true;
+        const QList<QGraphicsItem *> sel = m_scene->selectedItems();
+        for (QGraphicsItem *it : sel) {
+            if (it->type() == EdgeItem::Type)
+                it->setSelected(false);
+        }
+        m_filteringSelection = false;
+    });
 
     centerOn(0, 0);
 }
@@ -51,6 +66,20 @@ void CanvasView::setZoomAt(qreal z, const QPoint &viewportPos)
     verticalScrollBar()->setValue(verticalScrollBar()->value() + moved.y());
 }
 
+void CanvasView::fitAll()
+{
+    const QRectF r = m_scene->nodesBoundingRect();
+    if (r.isEmpty())
+        return;
+    const qreal margin = 40;    // 屏幕像素
+    const QSizeF vp = viewport()->size();
+    const qreal z = qMin((vp.width() - 2 * margin) / r.width(),
+                         (vp.height() - 2 * margin) / r.height());
+    // 只为看全而缩小，不因为节点少而放大超过 100%。
+    setTransform(QTransform::fromScale(qBound(kMinZoom, z, 1.0), qBound(kMinZoom, z, 1.0)));
+    centerOn(r.center());
+}
+
 DocView CanvasView::viewState() const
 {
     DocView v;
@@ -68,6 +97,19 @@ void CanvasView::setViewState(const DocView &v)
     const QPoint moved = mapFromScene(QPointF(v.x, v.y));
     horizontalScrollBar()->setValue(horizontalScrollBar()->value() + moved.x());
     verticalScrollBar()->setValue(verticalScrollBar()->value() + moved.y());
+}
+
+bool CanvasView::event(QEvent *event)
+{
+    // QGraphicsView / QWidget 会先把 Tab 拿去做焦点切换；这里直接当普通按键处理。
+    if (event->type() == QEvent::KeyPress) {
+        QKeyEvent *k = static_cast<QKeyEvent *>(event);
+        if (k->key() == Qt::Key_Tab || k->key() == Qt::Key_Backtab) {
+            keyPressEvent(k);
+            return true;
+        }
+    }
+    return QGraphicsView::event(event);
 }
 
 void CanvasView::drawBackground(QPainter *painter, const QRectF &rect)
@@ -133,6 +175,17 @@ void CanvasView::updateCursor()
         viewport()->unsetCursor();
 }
 
+// Shift+单击 = 加选或减选，Shift+框选 = 追加。QGraphicsScene 内建用的是 Ctrl，
+// 而且按下、移动、释放都要看修饰键，所以整个鼠标序列都把 Shift 换成 Ctrl 再转发。
+QMouseEvent CanvasView::shiftAsCtrl(const QMouseEvent *event)
+{
+    Qt::KeyboardModifiers mods = event->modifiers();
+    if (mods & Qt::ShiftModifier)
+        mods = (mods & ~Qt::ShiftModifier) | Qt::ControlModifier;
+    return QMouseEvent(event->type(), event->localPos(), event->windowPos(), event->screenPos(),
+                       event->button(), event->buttons(), mods, event->source());
+}
+
 void CanvasView::mousePressEvent(QMouseEvent *event)
 {
     const bool panButton = event->button() == Qt::MiddleButton
@@ -144,7 +197,11 @@ void CanvasView::mousePressEvent(QMouseEvent *event)
         event->accept();
         return;
     }
-    QGraphicsView::mousePressEvent(event);
+    if (event->button() == Qt::LeftButton) {
+        m_rubberBanding = !itemAt(event->pos());
+    }
+    QMouseEvent e = shiftAsCtrl(event);
+    QGraphicsView::mousePressEvent(&e);
 }
 
 void CanvasView::mouseMoveEvent(QMouseEvent *event)
@@ -157,7 +214,8 @@ void CanvasView::mouseMoveEvent(QMouseEvent *event)
         event->accept();
         return;
     }
-    QGraphicsView::mouseMoveEvent(event);
+    QMouseEvent e = shiftAsCtrl(event);
+    QGraphicsView::mouseMoveEvent(&e);
 }
 
 void CanvasView::mouseReleaseEvent(QMouseEvent *event)
@@ -168,7 +226,10 @@ void CanvasView::mouseReleaseEvent(QMouseEvent *event)
         event->accept();
         return;
     }
-    QGraphicsView::mouseReleaseEvent(event);
+    QMouseEvent e = shiftAsCtrl(event);
+    QGraphicsView::mouseReleaseEvent(&e);
+    if (event->button() == Qt::LeftButton)
+        m_rubberBanding = false;
 }
 
 void CanvasView::mouseDoubleClickEvent(QMouseEvent *event)
@@ -189,7 +250,52 @@ void CanvasView::keyPressEvent(QKeyEvent *event)
         return;
     }
 
+    const bool ctrl = event->modifiers() & Qt::ControlModifier;
+    const bool shift = event->modifiers() & Qt::ShiftModifier;
+
+    if (ctrl) {
+        switch (event->key()) {
+        case Qt::Key_Z:
+            if (shift)
+                m_scene->undoStack()->redo();
+            else
+                m_scene->undoStack()->undo();
+            event->accept();
+            return;
+        case Qt::Key_Y:
+            m_scene->undoStack()->redo();
+            event->accept();
+            return;
+        case Qt::Key_A:
+            m_scene->selectAllNodes();
+            event->accept();
+            return;
+        case Qt::Key_1:
+            fitAll();
+            event->accept();
+            return;
+        default:
+            break;
+        }
+    }
+
     switch (event->key()) {
+    case Qt::Key_Tab: {
+        // 只在恰好选中一个节点时有效。
+        const QList<NodeItem *> sel = m_scene->selectedNodes();
+        if (sel.size() == 1 && m_scene->selectedItems().size() == 1)
+            m_scene->createLinkedNode(sel.first());
+        event->accept();
+        return;
+    }
+    case Qt::Key_Backtab:
+        event->accept();
+        return;
+    case Qt::Key_Delete:
+    case Qt::Key_Backspace:
+        m_scene->deleteSelection();
+        event->accept();
+        return;
     case Qt::Key_Space:
         if (!event->isAutoRepeat()) {
             m_spaceDown = true;
