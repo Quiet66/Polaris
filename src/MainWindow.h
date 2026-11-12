@@ -79,6 +79,7 @@ private:
     void reportHotkeyFailures(const QStringList &failed);
     void onHotkey(int id);
     void showHotkeyDialog();
+    void applyMouseGestures();              // 把偏好里的鼠标手势交给画布
     void quitApp();                         // 真正退出（关闭窗口只是隐藏到托盘）
 
     // 文件操作

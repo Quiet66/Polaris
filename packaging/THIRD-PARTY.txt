@@ -1,0 +1,37 @@
+﻿Polaris 使用的第三方组件
+========================
+
+Polaris 自身的代码以 MIT 许可证发布（见 LICENSE.txt）。
+程序包里另外带有下面这些第三方组件，它们各自有自己的许可证。
+Polaris 没有修改其中任何一个，只是原样随包分发。
+
+
+1. Qt 5.15.2  （Qt5Core.dll、Qt5Gui.dll、Qt5Widgets.dll，
+               platforms\qwindows.dll、styles\qwindowsvistastyle.dll）
+
+   版权所有 (C) The Qt Company Ltd. 及其他贡献者。
+   许可证：GNU Lesser General Public License v3（LGPL-3.0）。
+   许可证原文：licenses\LGPL-3.0.txt（它引用的 GPL-3.0 见 licenses\GPL-3.0.txt）。
+   源代码：https://download.qt.io/archive/qt/5.15/5.15.2/single/
+
+   Polaris 以动态链接的方式使用 Qt。按照 LGPL 的规定，你可以用自己编译的、
+   接口兼容的 Qt 5.15 版本替换包里的这些 DLL，Polaris 仍可运行。
+   为了减小体积，包里的 Qt DLL 去掉了符号表（strip），代码本身没有改动。
+
+
+2. MinGW-w64 / GCC 8.1.0 运行库
+   （libgcc_s_dw2-1.dll、libstdc++-6.dll）
+
+   版权所有 (C) Free Software Foundation, Inc.
+   许可证：GPL-3.0，附带 GCC Runtime Library Exception 3.1。
+   该例外条款允许把这些运行库与任何许可证的程序一起分发。
+   许可证原文：licenses\GPL-3.0.txt
+   例外条款：https://www.gnu.org/licenses/gcc-exception-3.1.html
+   源代码：https://gcc.gnu.org/
+
+
+3. winpthreads  （libwinpthread-1.dll）
+
+   版权所有 (C) 2011-2016 mingw-w64 project。
+   许可证：MIT 许可证与 BSD 三条款许可证。
+   源代码与许可证原文：https://www.mingw-w64.org/

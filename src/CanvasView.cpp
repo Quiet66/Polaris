@@ -47,6 +47,71 @@ CanvasView::CanvasView(CanvasScene *scene, QWidget *parent)
     centerOn(0, 0);
 }
 
+void CanvasView::setGestures(MouseGesture pan, MouseGesture windowDrag)
+{
+    m_panGesture = pan;
+    m_windowGesture = windowDrag;
+    updateCursor();
+}
+
+QString CanvasView::gestureKey(MouseGesture g)
+{
+    switch (g) {
+    case MouseGesture::SpaceLeft: return QStringLiteral("space+left");
+    case MouseGesture::Right:     return QStringLiteral("right");
+    case MouseGesture::Middle:    return QStringLiteral("middle");
+    case MouseGesture::CtrlLeft:  return QStringLiteral("ctrl+left");
+    case MouseGesture::AltLeft:   return QStringLiteral("alt+left");
+    case MouseGesture::None:      break;
+    }
+    return QStringLiteral("none");
+}
+
+MouseGesture CanvasView::gestureFromKey(const QString &key, MouseGesture fallback)
+{
+    static const MouseGesture all[] = { MouseGesture::None, MouseGesture::SpaceLeft,
+                                        MouseGesture::Right, MouseGesture::Middle,
+                                        MouseGesture::CtrlLeft, MouseGesture::AltLeft };
+    for (MouseGesture g : all) {
+        if (gestureKey(g) == key)
+            return g;
+    }
+    return fallback;
+}
+
+QString CanvasView::gestureLabel(MouseGesture g)
+{
+    switch (g) {
+    case MouseGesture::SpaceLeft: return QStringLiteral("空格 + 左键拖动");
+    case MouseGesture::Right:     return QStringLiteral("右键拖动");
+    case MouseGesture::Middle:    return QStringLiteral("中键拖动");
+    case MouseGesture::CtrlLeft:  return QStringLiteral("Ctrl + 左键拖动");
+    case MouseGesture::AltLeft:   return QStringLiteral("Alt + 左键拖动");
+    case MouseGesture::None:      break;
+    }
+    return QStringLiteral("不启用");
+}
+
+bool CanvasView::matches(MouseGesture g, const QMouseEvent *event) const
+{
+    const Qt::KeyboardModifiers mods = event->modifiers();
+    switch (g) {
+    case MouseGesture::SpaceLeft:
+        return event->button() == Qt::LeftButton && m_spaceDown;
+    case MouseGesture::Right:
+        return event->button() == Qt::RightButton;
+    case MouseGesture::Middle:
+        return event->button() == Qt::MiddleButton;
+    case MouseGesture::CtrlLeft:
+        return event->button() == Qt::LeftButton && (mods & Qt::ControlModifier) && !m_spaceDown;
+    case MouseGesture::AltLeft:
+        return event->button() == Qt::LeftButton && (mods & Qt::AltModifier) && !m_spaceDown;
+    case MouseGesture::None:
+        break;
+    }
+    return false;
+}
+
 qreal CanvasView::zoom() const
 {
     return transform().m11();
@@ -132,10 +197,15 @@ void CanvasView::wheelEvent(QWheelEvent *event)
 
 void CanvasView::updateCursor()
 {
-    if (m_panning)
+    const bool spaceUsed = m_panGesture == MouseGesture::SpaceLeft
+                        || m_windowGesture == MouseGesture::SpaceLeft;
+    if (m_movingWindow)
+        viewport()->setCursor(Qt::SizeAllCursor);
+    else if (m_panning)
         viewport()->setCursor(Qt::ClosedHandCursor);
-    else if (m_spaceDown)
-        viewport()->setCursor(Qt::OpenHandCursor);
+    else if (m_spaceDown && spaceUsed)
+        viewport()->setCursor(m_windowGesture == MouseGesture::SpaceLeft ? Qt::SizeAllCursor
+                                                                         : Qt::OpenHandCursor);
     else
         viewport()->unsetCursor();
 }
@@ -153,13 +223,36 @@ QMouseEvent CanvasView::shiftAsCtrl(const QMouseEvent *event)
 
 void CanvasView::mousePressEvent(QMouseEvent *event)
 {
-    const bool panButton = event->button() == Qt::MiddleButton
-                        || (event->button() == Qt::LeftButton && m_spaceDown);
-    if (panButton) {
+    if (m_panning || m_movingWindow) {
+        event->accept();        // 拖动途中又按了别的键：忽略
+        return;
+    }
+
+    // 拖动整个窗口（手势可在设置里改）。自己跟着光标移动窗口，这样任何鼠标键都能用。
+    if (matches(m_windowGesture, event)) {
+        if (!window()->isMaximized()) {
+            m_movingWindow = true;
+            m_dragButton = event->button();
+            m_windowDragOffset = event->globalPos() - window()->pos();
+            updateCursor();
+        }
+        event->accept();
+        return;
+    }
+
+    // 拖动画布。中键没有另作他用时，始终可以平移。
+    const bool middleFree = event->button() == Qt::MiddleButton
+                         && m_windowGesture != MouseGesture::Middle;
+    if (matches(m_panGesture, event) || middleFree) {
         m_panning = true;
+        m_dragButton = event->button();
         m_lastPanPos = event->pos();
         updateCursor();
         event->accept();
+        return;
+    }
+    if (event->button() == Qt::RightButton && !m_scene->editingNode()) {
+        event->accept();        // 右键没有分配手势时不做任何事（不改变选择）
         return;
     }
     if (event->button() == Qt::LeftButton) {
@@ -171,6 +264,11 @@ void CanvasView::mousePressEvent(QMouseEvent *event)
 
 void CanvasView::mouseMoveEvent(QMouseEvent *event)
 {
+    if (m_movingWindow) {
+        window()->move(event->globalPos() - m_windowDragOffset);
+        event->accept();
+        return;
+    }
     if (m_panning) {
         const QPoint d = event->pos() - m_lastPanPos;
         m_lastPanPos = event->pos();
@@ -185,9 +283,13 @@ void CanvasView::mouseMoveEvent(QMouseEvent *event)
 
 void CanvasView::mouseReleaseEvent(QMouseEvent *event)
 {
-    if (m_panning && (event->button() == Qt::MiddleButton || event->button() == Qt::LeftButton)) {
-        m_panning = false;
-        updateCursor();
+    if (m_panning || m_movingWindow) {
+        if (event->button() == m_dragButton) {
+            m_panning = false;
+            m_movingWindow = false;
+            m_dragButton = Qt::NoButton;
+            updateCursor();
+        }
         event->accept();
         return;
     }
@@ -311,6 +413,8 @@ void CanvasView::focusOutEvent(QFocusEvent *event)
     // 失去焦点后收不到按键释放，这里复位空格和平移状态。
     m_spaceDown = false;
     m_panning = false;
+    m_movingWindow = false;
+    m_dragButton = Qt::NoButton;
     updateCursor();
     QGraphicsView::focusOutEvent(event);
 }

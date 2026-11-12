@@ -8,7 +8,7 @@
 class QSettings;
 
 // 偏好设置：ini 文件，放在数据目录里（SPEC 第 7 节）。
-// 数据目录 = 程序目录下的 data/；不可写时改用 %APPDATA%\TrailCanvas。
+// 数据目录 = 程序目录下的 data/；不可写时改用 %APPDATA%\Polaris。
 class Prefs
 {
 public:
@@ -39,6 +39,10 @@ public:
     // 全局快捷键，按名字存取（QKeySequence 的可移植文本，空 = 不启用）。
     QString hotkey(const QString &name, const QString &fallback) const;
     void setHotkey(const QString &name, const QString &sequence);
+
+    // 鼠标手势（拖动画布、拖动窗口），存的是 CanvasView::gestureKey() 的字符串。
+    QString mouseGesture(const QString &name, const QString &fallback) const;
+    void setMouseGesture(const QString &name, const QString &key);
 
     QString lastFile() const;           // 上次保存或打开的文件
     void setLastFile(const QString &path);

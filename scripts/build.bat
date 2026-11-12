@@ -5,6 +5,6 @@ setlocal
 if "%QTROOT%"=="" set QTROOT=C:\Qt
 set PATH=%QTROOT%\5.15.2\mingw81_32\bin;%QTROOT%\Tools\mingw810_32\bin;%PATH%
 cd /d "%~dp0.."
-qmake trailcanvas.pro -spec win32-g++ CONFIG+=release || exit /b 1
+qmake polaris.pro -spec win32-g++ CONFIG+=release || exit /b 1
 mingw32-make -j4 || exit /b 1
-echo Build OK: build\bin\trailcanvas.exe
+echo Build OK: build\bin\polaris.exe

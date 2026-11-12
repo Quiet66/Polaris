@@ -6,6 +6,7 @@
 
 // Markdown 写出与读入（SPEC 第 7 节）。
 // 文件 = 标题 + 大纲 + 可选的"其他关联" + 末尾一行 HTML 注释（完整 doc 的紧凑 JSON）。
+// 注释写作 <!-- polaris:{...} -->；改名前的 <!-- trailcanvas:{...} --> 读入时仍然认。
 namespace MdIo {
 
 // 生成整个 .md 文件的文本。

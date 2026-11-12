@@ -9,8 +9,8 @@ namespace WinNative {
 
 namespace {
 
-const wchar_t kMutexName[]    = L"Local\\TrailCanvas.SingleInstance";
-const wchar_t kActivateName[] = L"TrailCanvas.Activate";
+const wchar_t kMutexName[]    = L"Local\\Polaris.SingleInstance";
+const wchar_t kActivateName[] = L"Polaris.Activate";
 
 UINT activateMessage()
 {

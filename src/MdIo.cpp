@@ -11,7 +11,25 @@
 
 namespace {
 
-const QLatin1String kMarker("<!-- trailcanvas:");
+const QLatin1String kMarker("<!-- polaris:");
+// 改名前（TrailCanvas）保存的文件用的是这个标记，读入时仍然认。
+const QLatin1String kLegacyMarker("<!-- trailcanvas:");
+
+// 布局注释必须独占一行的开头：节点文字里即使出现同样的标记，也在 JSON 内部，不会被误认。
+// 返回 JSON 起始位置，找不到返回 -1。
+int findLayoutJson(const QString &text)
+{
+    int best = -1;
+    for (const QLatin1String &marker : { kMarker, kLegacyMarker }) {
+        int start = text.startsWith(marker) ? 0 : -1;
+        const int nl = text.lastIndexOf(QLatin1Char('\n') + QString(marker));
+        if (nl >= 0)
+            start = nl + 1;
+        if (start >= 0)
+            best = qMax(best, start + marker.size());
+    }
+    return best;
+}
 
 struct Graph
 {
@@ -142,20 +160,12 @@ QString MdIo::toMarkdown(const Document &doc, const QString &title)
 
 bool MdIo::fromMarkdown(const QString &text, Document *out, QString *error)
 {
-    // 注释必须独占一行的开头：节点文字里即使出现同样的标记，也在 JSON 内部，不会被误认。
-    int start = -1;
-    if (text.startsWith(kMarker)) {
-        start = 0;
-    }
-    const int nl = text.lastIndexOf(QLatin1Char('\n') + QString(kMarker));
-    if (nl >= 0)
-        start = nl + 1;
-    if (start < 0) {
+    const int jsonStart = findLayoutJson(text);
+    if (jsonStart < 0) {
         if (error)
-            *error = QStringLiteral("这个文件里没有 TrailCanvas 的布局信息，暂时无法打开。");
+            *error = QStringLiteral("这个文件里没有 Polaris 的布局信息，暂时无法打开。");
         return false;
     }
-    const int jsonStart = start + kMarker.size();
     const int end = text.indexOf(QLatin1String("-->"), jsonStart);
     if (end < 0) {
         if (error)

@@ -11,6 +11,7 @@
 
 #include <QApplication>
 #include <QCloseEvent>
+#include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDir>
@@ -77,6 +78,17 @@ const QVector<HotkeyDef> &hotkeyDefs()
         { "opacityDown", "Ctrl+Alt+Down",  QStringLiteral("降低不透明度"),    true  },
     };
     return defs;
+}
+
+// 鼠标手势的默认值与可选项。
+const MouseGesture kDefaultPan    = MouseGesture::SpaceLeft;
+const MouseGesture kDefaultWindow = MouseGesture::AltLeft;
+
+MouseGesture storedGesture(const char *name, MouseGesture fallback)
+{
+    const QString key = Prefs::instance().mouseGesture(QString::fromLatin1(name),
+                                                       CanvasView::gestureKey(fallback));
+    return CanvasView::gestureFromKey(key, fallback);
 }
 
 QString hotkeyValue(const HotkeyDef &d)
@@ -192,7 +204,7 @@ MainWindow::MainWindow(QWidget *parent)
     , m_draftTimer(new QTimer(this))
 {
     setWindowFlags(Qt::Window | Qt::FramelessWindowHint);
-    setWindowTitle(QStringLiteral("TrailCanvas"));
+    setWindowTitle(QStringLiteral("Polaris"));
     setWindowIcon(QIcon(QStringLiteral(":/icon.png")));
     setMinimumSize(240, 160);
     resize(900, 600);
@@ -235,6 +247,12 @@ MainWindow::MainWindow(QWidget *parent)
 
     restoreWindowState();
     setupTray();
+    applyMouseGestures();
+}
+
+void MainWindow::applyMouseGestures()
+{
+    m_view->setGestures(storedGesture("pan", kDefaultPan), storedGesture("window", kDefaultWindow));
 }
 
 // -------------------------------------------------------------- 窗口与系统集成
@@ -282,7 +300,7 @@ void MainWindow::setupTray()
         return;         // 没有托盘时，关闭窗口就是退出
 
     m_tray = new QSystemTrayIcon(windowIcon(), this);
-    m_tray->setToolTip(QStringLiteral("TrailCanvas"));
+    m_tray->setToolTip(QStringLiteral("Polaris"));
 
     // 右键菜单与左上角按钮的菜单内容相同；每次弹出前重建，保证勾选状态是最新的。
     m_trayMenu = new QMenu(this);
@@ -378,12 +396,12 @@ void MainWindow::reportHotkeyFailures(const QStringList &failed)
     if (failed.isEmpty())
         return;
     const QString msg = QStringLiteral("以下全局快捷键注册失败，可能已被其他程序占用：\n%1\n"
-                                       "可以在菜单的“快捷键设置”里改用别的组合。")
+                                       "可以在菜单的“快捷键与鼠标设置”里改用别的组合。")
                             .arg(failed.join(QLatin1Char('\n')));
     if (m_tray)
-        m_tray->showMessage(QStringLiteral("TrailCanvas"), msg, QSystemTrayIcon::Warning, 8000);
+        m_tray->showMessage(QStringLiteral("Polaris"), msg, QSystemTrayIcon::Warning, 8000);
     else
-        QMessageBox::warning(this, QStringLiteral("TrailCanvas"), msg);
+        QMessageBox::warning(this, QStringLiteral("Polaris"), msg);
 }
 
 void MainWindow::onHotkey(int id)
@@ -402,7 +420,7 @@ void MainWindow::showHotkeyDialog()
     const QVector<HotkeyDef> &defs = hotkeyDefs();
 
     QDialog dlg(this);
-    dlg.setWindowTitle(QStringLiteral("快捷键设置"));
+    dlg.setWindowTitle(QStringLiteral("快捷键与鼠标设置"));
     dlg.setWindowFlags(dlg.windowFlags() & ~Qt::WindowContextHelpButtonHint);
 
     QFormLayout *form = new QFormLayout;
@@ -426,10 +444,61 @@ void MainWindow::showHotkeyDialog()
                                                   QKeySequence::PortableText));
     });
 
+    // 鼠标手势：拖动画布、拖动窗口。
+    auto gestureCombo = [&dlg](const QVector<MouseGesture> &choices, MouseGesture current) {
+        QComboBox *box = new QComboBox(&dlg);
+        for (MouseGesture g : choices)
+            box->addItem(CanvasView::gestureLabel(g), CanvasView::gestureKey(g));
+        box->setCurrentIndex(qMax(0, box->findData(CanvasView::gestureKey(current))));
+        return box;
+    };
+    const QVector<MouseGesture> panChoices = { MouseGesture::SpaceLeft, MouseGesture::Right,
+                                               MouseGesture::Middle, MouseGesture::CtrlLeft,
+                                               MouseGesture::AltLeft };
+    const QVector<MouseGesture> windowChoices = { MouseGesture::AltLeft, MouseGesture::CtrlLeft,
+                                                  MouseGesture::Right, MouseGesture::Middle,
+                                                  MouseGesture::SpaceLeft, MouseGesture::None };
+    QComboBox *panBox = gestureCombo(panChoices, storedGesture("pan", kDefaultPan));
+    QComboBox *windowBox = gestureCombo(windowChoices, storedGesture("window", kDefaultWindow));
+    QFormLayout *mouseForm = new QFormLayout;
+    mouseForm->addRow(QStringLiteral("拖动画布"), panBox);
+    mouseForm->addRow(QStringLiteral("拖动窗口"), windowBox);
+
+    connect(reset, &QPushButton::clicked, &dlg, [&]() {
+        panBox->setCurrentIndex(panBox->findData(CanvasView::gestureKey(kDefaultPan)));
+        windowBox->setCurrentIndex(windowBox->findData(CanvasView::gestureKey(kDefaultWindow)));
+    });
+    // 两个手势相同就分不清要拖哪个：不让确定。
+    disconnect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::accepted, &dlg, [&]() {
+        if (panBox->currentData() == windowBox->currentData()) {
+            QMessageBox::warning(&dlg, QStringLiteral("Polaris"),
+                                 QStringLiteral("“拖动画布”和“拖动窗口”不能设成同一种操作。"));
+            return;
+        }
+        dlg.accept();
+    });
+
+    QLabel *keyTitle = new QLabel(QStringLiteral("全局快捷键（在任何程序里都有效）"), &dlg);
     QLabel *hint = new QLabel(QStringLiteral("点一下输入框再按下组合键；清空表示不启用。"), &dlg);
+    QLabel *mouseTitle = new QLabel(QStringLiteral("鼠标操作"), &dlg);
+    QLabel *mouseHint = new QLabel(
+        QStringLiteral("中键拖动始终可以平移画布（除非把它设成拖动窗口）。\n"
+                       "左上角的圆点始终可以拖动窗口。"), &dlg);
+    QFont bold = keyTitle->font();
+    bold.setBold(true);
+    keyTitle->setFont(bold);
+    mouseTitle->setFont(bold);
+
     QVBoxLayout *layout = new QVBoxLayout(&dlg);
+    layout->addWidget(mouseTitle);
+    layout->addLayout(mouseForm);
+    layout->addWidget(mouseHint);
+    layout->addSpacing(10);
+    layout->addWidget(keyTitle);
     layout->addWidget(hint);
     layout->addLayout(form);
+    layout->addSpacing(6);
     layout->addWidget(buttons);
 
     // 设置期间先注销，否则按下当前的组合键会直接触发功能而录不进去。
@@ -444,10 +513,14 @@ void MainWindow::showHotkeyDialog()
                                                : QKeySequence(seq[0]).toString(QKeySequence::PortableText);
             Prefs::instance().setHotkey(QString::fromLatin1(defs[i].name), text);
         }
+        Prefs::instance().setMouseGesture(QStringLiteral("pan"), panBox->currentData().toString());
+        Prefs::instance().setMouseGesture(QStringLiteral("window"),
+                                          windowBox->currentData().toString());
+        applyMouseGestures();
     }
     const QStringList failed = registerHotkeys();
     if (!failed.isEmpty()) {
-        QMessageBox::warning(this, QStringLiteral("TrailCanvas"),
+        QMessageBox::warning(this, QStringLiteral("Polaris"),
                              QStringLiteral("以下全局快捷键注册失败，可能已被其他程序占用：\n%1")
                                  .arg(failed.join(QLatin1Char('\n'))));
     }
@@ -588,7 +661,7 @@ void MainWindow::populateMenu(QMenu *menu)
             [this, level]() { setOpacityLevel(level / 10.0); });
     }
 
-    run(item(menu, QStringLiteral("快捷键设置…")), [this]() { showHotkeyDialog(); });
+    run(item(menu, QStringLiteral("快捷键与鼠标设置…")), [this]() { showHotkeyDialog(); });
     menu->addSeparator();
 
     if (m_tray) {
@@ -673,7 +746,7 @@ bool MainWindow::maybeSave()
 
     QMessageBox box(this);
     box.setIcon(QMessageBox::Question);
-    box.setWindowTitle(QStringLiteral("TrailCanvas"));
+    box.setWindowTitle(QStringLiteral("Polaris"));
     box.setText(QStringLiteral("“%1”有未保存的修改，要保存吗？").arg(docTitle()));
     QPushButton *save = box.addButton(QStringLiteral("保存"), QMessageBox::AcceptRole);
     QPushButton *discard = box.addButton(QStringLiteral("不保存"), QMessageBox::DestructiveRole);
@@ -719,7 +792,7 @@ bool MainWindow::openFile(const QString &path)
     Document d;
     QString err;
     if (!MdIo::loadFile(path, &d, &err)) {
-        QMessageBox::warning(this, QStringLiteral("TrailCanvas"),
+        QMessageBox::warning(this, QStringLiteral("Polaris"),
                              QStringLiteral("无法打开文件：\n%1\n\n%2").arg(QDir::toNativeSeparators(path), err));
         return false;
     }
@@ -759,7 +832,7 @@ bool MainWindow::saveTo(const QString &path)
     const QString abs = QFileInfo(path).absoluteFilePath();
     // 标题默认取文件名。
     if (!MdIo::saveFile(abs, currentDocument(), QFileInfo(abs).completeBaseName(), &err)) {
-        QMessageBox::warning(this, QStringLiteral("TrailCanvas"),
+        QMessageBox::warning(this, QStringLiteral("Polaris"),
                              QStringLiteral("保存失败：\n%1\n\n%2").arg(QDir::toNativeSeparators(abs), err));
         return false;
     }
@@ -775,7 +848,7 @@ void MainWindow::exportImage()
 {
     m_scene->commitEditing();
     if (m_scene->isEmpty()) {
-        QMessageBox::information(this, QStringLiteral("TrailCanvas"),
+        QMessageBox::information(this, QStringLiteral("Polaris"),
                                  QStringLiteral("画布是空的，没有可导出的内容。"));
         return;
     }
@@ -793,7 +866,7 @@ void MainWindow::exportImage()
 
     QString err;
     if (!Exporter::exportPng(m_scene, path, chosen != noBg, &err)) {
-        QMessageBox::warning(this, QStringLiteral("TrailCanvas"),
+        QMessageBox::warning(this, QStringLiteral("Polaris"),
                              QStringLiteral("导出失败：\n%1").arg(err));
         return;
     }
@@ -820,7 +893,7 @@ bool MainWindow::checkDraftOnStartup()
     const QString source = prefs.draftSource();
     QMessageBox box(this);
     box.setIcon(QMessageBox::Question);
-    box.setWindowTitle(QStringLiteral("TrailCanvas"));
+    box.setWindowTitle(QStringLiteral("Polaris"));
     box.setText(QStringLiteral("上次有未保存的内容（%1，%2 个节点），要恢复吗？")
                     .arg(source.isEmpty() ? QStringLiteral("未命名")
                                           : QFileInfo(source).completeBaseName())

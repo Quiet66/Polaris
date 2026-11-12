@@ -150,7 +150,7 @@ int main(int argc, char **argv)
         d.edges = { E("e1", "a", "b", 3) };
 
         const QString md = MdIo::toMarkdown(d, QStringLiteral("标题"));
-        const int marker = md.lastIndexOf(QLatin1String("<!-- trailcanvas:"));
+        const int marker = md.lastIndexOf(QLatin1String("<!-- polaris:"));
         const QString comment = md.mid(marker);
         check(marker > 0, "round trip: marker present");
         check(comment.count(QLatin1Char('>')) == 1 && comment.trimmed().endsWith(QLatin1String("-->")),
@@ -169,12 +169,25 @@ int main(int argc, char **argv)
     // 8b. 节点文字里出现标记本身，也不会被误认成布局注释。
     {
         Document d;
-        d.nodes = { N("a", QStringLiteral("<!-- trailcanvas:{\"version\":1} -->"), 1) };
+        d.nodes = { N("a", QStringLiteral("<!-- polaris:{\"version\":1} -->"), 1) };
         Document r;
         QString err;
         check(MdIo::fromMarkdown(MdIo::toMarkdown(d, QStringLiteral("T")), &r, &err)
                   && r.nodes.size() == 1 && r.nodes[0].text == d.nodes[0].text,
               "round trip: marker text inside a node");
+    }
+
+    // 8c. 改名前保存的文件（标记是 trailcanvas）仍然能打开。
+    {
+        Document d;
+        d.nodes = { N("a", QStringLiteral("旧文件"), 1) };
+        QString md = MdIo::toMarkdown(d, QStringLiteral("T"));
+        md.replace(QLatin1String("<!-- polaris:"), QLatin1String("<!-- trailcanvas:"));
+        Document r;
+        QString err;
+        check(MdIo::fromMarkdown(md, &r, &err) && r.nodes.size() == 1
+                  && r.nodes[0].text == QStringLiteral("旧文件"),
+              "legacy marker from before the rename still loads");
     }
 
     // 9. 文件往返：UTF-8 无 BOM，原子写入后可读回。
@@ -203,9 +216,9 @@ int main(int argc, char **argv)
         QString err;
         check(!MdIo::fromMarkdown(QStringLiteral("# 手写\n\n- a\n  - b\n"), &r, &err) && !err.isEmpty(),
               "no comment: rejected with a message");
-        check(!MdIo::fromMarkdown(QStringLiteral("<!-- trailcanvas:{\"version\":1"), &r, &err),
+        check(!MdIo::fromMarkdown(QStringLiteral("<!-- polaris:{\"version\":1"), &r, &err),
               "unterminated comment: rejected");
-        check(!MdIo::fromMarkdown(QStringLiteral("<!-- trailcanvas:{oops} -->"), &r, &err),
+        check(!MdIo::fromMarkdown(QStringLiteral("<!-- polaris:{oops} -->"), &r, &err),
               "broken json: rejected");
     }
 

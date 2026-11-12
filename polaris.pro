@@ -1,8 +1,8 @@
-# TrailCanvas — Qt 5.15.2 / MinGW 8.1 (32-bit)
+# Polaris — Qt 5.15.2 / MinGW 8.1 (32-bit)
 # 只使用 QtCore / QtGui / QtWidgets，无第三方库。
 QT       = core gui widgets
 TEMPLATE = app
-TARGET   = trailcanvas
+TARGET   = polaris
 CONFIG  += c++14 warn_on
 CONFIG  -= debug_and_release
 

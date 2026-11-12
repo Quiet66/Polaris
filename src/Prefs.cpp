@@ -25,7 +25,7 @@ QString chooseDataDir()
     const QString local = QCoreApplication::applicationDirPath() + QStringLiteral("/data");
     if (ensureWritable(local))
         return local;
-    // Windows 上是 %APPDATA%\TrailCanvas。
+    // Windows 上是 %APPDATA%\Polaris。
     const QString roaming = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     ensureWritable(roaming);
     return roaming;
@@ -43,7 +43,7 @@ Prefs &Prefs::instance()
 
 Prefs::Prefs()
     : m_dataDir(chooseDataDir())
-    , m_settings(new QSettings(m_dataDir + QStringLiteral("/trailcanvas.ini"), QSettings::IniFormat))
+    , m_settings(new QSettings(m_dataDir + QStringLiteral("/polaris.ini"), QSettings::IniFormat))
 {
 }
 
@@ -184,5 +184,16 @@ QString Prefs::hotkey(const QString &name, const QString &fallback) const
 void Prefs::setHotkey(const QString &name, const QString &sequence)
 {
     m_settings->setValue(QStringLiteral("hotkey/") + name, sequence);
+    m_settings->sync();
+}
+
+QString Prefs::mouseGesture(const QString &name, const QString &fallback) const
+{
+    return m_settings->value(QStringLiteral("mouse/") + name, fallback).toString();
+}
+
+void Prefs::setMouseGesture(const QString &name, const QString &key)
+{
+    m_settings->setValue(QStringLiteral("mouse/") + name, key);
     m_settings->sync();
 }

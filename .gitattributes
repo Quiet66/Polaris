@@ -1,0 +1,4 @@
+# Windows 用户直接用记事本打开的文件：保持 UTF-8 BOM 和 CRLF，不做换行转换。
+packaging/*.txt -text
+scripts/*.bat   -text
+packaging/licenses/*.txt -text

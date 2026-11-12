@@ -11,7 +11,7 @@ int main(int argc, char *argv[])
     QCoreApplication::setAttribute(Qt::AA_UseHighDpiPixmaps);
 
     QApplication app(argc, argv);
-    QCoreApplication::setApplicationName(QStringLiteral("TrailCanvas"));
+    QCoreApplication::setApplicationName(QStringLiteral("Polaris"));
 
     // 单实例：重复启动时唤出已有窗口，然后退出。
     if (!WinNative::acquireSingleInstance()) {
