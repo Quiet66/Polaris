@@ -5,13 +5,18 @@
 
 #include <QAbstractTextDocumentLayout>
 #include <QApplication>
+#include <QClipboard>
+#include <QGraphicsSceneContextMenuEvent>
 #include <QGraphicsSceneMouseEvent>
 #include <QInputMethodEvent>
 #include <QKeyEvent>
+#include <QMenu>
+#include <QMimeData>
 #include <QPainter>
 #include <QStyleOptionGraphicsItem>
 #include <QTextCursor>
 #include <QTextDocument>
+#include <QTextDocumentFragment>
 #include <QTextOption>
 
 // ---------------------------------------------------------------- NodeTextItem
@@ -27,6 +32,7 @@ NodeTextItem::NodeTextItem(NodeItem *owner)
 
     setTextInteractionFlags(Qt::NoTextInteraction);
     setAcceptedMouseButtons(Qt::NoButton);
+    setAcceptDrops(false);      // 不接受拖入：拖进来的也可能是带格式的文本
     // 平时隐藏：文字由 NodeItem 画进它自己的缓存（少一层图元，拖动缩放更省）；
     // 只有编辑时才显示出来接收输入。
     setVisible(false);
@@ -35,6 +41,68 @@ NodeTextItem::NodeTextItem(NodeItem *owner)
         if (m_owner->isEditing())
             m_owner->relayout();
     });
+}
+
+void NodeTextItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget)
+{
+    // QGraphicsTextItem 在获得焦点时会给文字画一圈虚线框；节点自己的边框已经表示了编辑状态。
+    QStyleOptionGraphicsItem opt(*option);
+    opt.state &= ~(QStyle::State_HasFocus | QStyle::State_Selected);
+    QGraphicsTextItem::paint(painter, &opt, widget);
+}
+
+void NodeTextItem::pastePlainText()
+{
+    const QMimeData *md = QApplication::clipboard()->mimeData();
+    if (!md)
+        return;
+    QString text = md->text();
+    if (text.isEmpty() && md->hasHtml())
+        text = QTextDocumentFragment::fromHtml(md->html()).toPlainText();   // 只有 HTML 的来源
+    if (text.isEmpty())
+        return;
+    text.replace(QLatin1String("\r\n"), QLatin1String("\n"));
+    text.replace(QLatin1Char('\r'), QLatin1Char('\n'));
+    // 显式给一个空格式：不继承光标处的格式。
+    textCursor().insertText(text, QTextCharFormat());
+}
+
+void NodeTextItem::contextMenuEvent(QGraphicsSceneContextMenuEvent *event)
+{
+    // 自己的右键菜单：系统默认的那个是英文的，而且它的"粘贴"会带入格式。
+    if (!m_owner->isEditing()) {
+        event->ignore();
+        return;
+    }
+    QMenu menu;
+    Theme::polishMenu(&menu);
+    const bool hasSelection = textCursor().hasSelection();
+    QAction *cut = menu.addAction(QStringLiteral("剪切"));
+    QAction *copy = menu.addAction(QStringLiteral("复制"));
+    QAction *paste = menu.addAction(QStringLiteral("粘贴"));
+    menu.addSeparator();
+    QAction *all = menu.addAction(QStringLiteral("全选"));
+    cut->setEnabled(hasSelection);
+    copy->setEnabled(hasSelection);
+
+    QAction *chosen = menu.exec(event->screenPos());
+    if (!m_owner->isEditing())
+        return;
+    if (chosen == cut || chosen == copy) {
+        // 复制出去的也只给纯文本。
+        QApplication::clipboard()->setText(textCursor().selectedText().replace(QChar(0x2029),
+                                                                               QLatin1Char('\n')));
+        if (chosen == cut)
+            textCursor().removeSelectedText();
+    } else if (chosen == paste) {
+        pastePlainText();
+    } else if (chosen == all) {
+        QTextCursor c = textCursor();
+        c.select(QTextCursor::Document);
+        setTextCursor(c);
+    }
+    setFocus(Qt::OtherFocusReason);
+    event->accept();
 }
 
 void NodeTextItem::inputMethodEvent(QInputMethodEvent *event)
@@ -58,6 +126,13 @@ bool NodeTextItem::sceneEvent(QEvent *event)
 
 void NodeTextItem::keyPressEvent(QKeyEvent *event)
 {
+    // 粘贴（Ctrl+V、Shift+Insert）：只取纯文本。
+    if (m_owner->isEditing() && event->matches(QKeySequence::Paste)) {
+        pastePlainText();
+        event->accept();
+        return;
+    }
+
     // 输入法组词期间，Enter / Tab / Esc 属于输入法，不触发确认或取消。
     if (!m_composing && m_owner->isEditing()) {
         switch (event->key()) {
@@ -127,8 +202,7 @@ NodeData NodeItem::data() const
 void NodeItem::setText(const QString &text)
 {
     m_data.text = text;
-    if (m_text->toPlainText() != text)
-        m_text->setPlainText(text);
+    m_text->setPlainText(text);     // 总是重设：顺带清掉文档里残留的任何格式
     relayout();
 }
 
@@ -416,8 +490,7 @@ void NodeItem::endEdit(EditEnd how)
     m_text->setVisible(false);
 
     m_data.text = newText;
-    if (m_text->toPlainText() != newText)
-        m_text->setPlainText(newText);
+    m_text->setPlainText(newText);  // 总是重设：节点里只保留纯文本，不留任何格式
     relayout();
 
     if (CanvasScene *s = canvasScene())

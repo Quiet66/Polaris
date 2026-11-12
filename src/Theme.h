@@ -3,6 +3,8 @@
 #include <QColor>
 #include <QString>
 
+class QMenu;
+
 // 所有颜色、圆角、间距集中在这里（SPEC 第 10 节）。
 struct Theme
 {
@@ -57,4 +59,6 @@ struct Theme
     static void setCurrent(const QString &name);   // "light" / "dark"
 
     QString menuStyleSheet() const;
+    // 把弹出菜单做成圆角、与当前主题一致。
+    static void polishMenu(QMenu *menu);
 };

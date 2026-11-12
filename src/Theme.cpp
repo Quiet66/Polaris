@@ -1,5 +1,8 @@
 #include "Theme.h"
 
+#include <QApplication>
+#include <QMenu>
+
 namespace {
 Theme &currentRef()
 {
@@ -74,4 +77,13 @@ QString Theme::menuStyleSheet() const
         "QMenu::right-arrow { width: 8px; height: 8px; right: 8px; }")
         .arg(menuFill.name(), menuBorder.name(), menuHover.name(),
              menuText.name(), menuTextDisabled.name());
+}
+
+void Theme::polishMenu(QMenu *menu)
+{
+    // 圆角菜单：弹出窗口本身要透明、无系统阴影，否则四角会露出方形底。
+    menu->setWindowFlags(menu->windowFlags() | Qt::FramelessWindowHint | Qt::NoDropShadowWindowHint);
+    menu->setAttribute(Qt::WA_TranslucentBackground);
+    menu->setStyleSheet(current().menuStyleSheet());
+    menu->setFont(QApplication::font());
 }

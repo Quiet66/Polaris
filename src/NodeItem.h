@@ -15,9 +15,15 @@ class NodeTextItem : public QGraphicsTextItem
 public:
     explicit NodeTextItem(NodeItem *owner);
 
+    void paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget) override;
+
+    // 节点里只有纯文本：粘贴时丢掉来源的格式（链接、颜色、字体等）。
+    void pastePlainText();
+
 protected:
     bool sceneEvent(QEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
+    void contextMenuEvent(QGraphicsSceneContextMenuEvent *event) override;
     void inputMethodEvent(QInputMethodEvent *event) override;
     void focusOutEvent(QFocusEvent *event) override;
 

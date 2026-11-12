@@ -565,11 +565,7 @@ void MainWindow::applySettings(const DocSettings &s)
 
 void MainWindow::polishMenu(QMenu *menu) const
 {
-    // 圆角菜单：弹出窗口本身要透明、无系统阴影，否则四角会露出方形底。
-    menu->setWindowFlags(menu->windowFlags() | Qt::FramelessWindowHint | Qt::NoDropShadowWindowHint);
-    menu->setAttribute(Qt::WA_TranslucentBackground);
-    menu->setStyleSheet(Theme::current().menuStyleSheet());
-    menu->setFont(QApplication::font());
+    Theme::polishMenu(menu);
 }
 
 void MainWindow::showMenu()
