@@ -17,5 +17,9 @@ cp "$QT"/bin/{Qt5Core,Qt5Gui,Qt5Widgets}.dll "$OUT/"
 cp "$QTROOT"/Tools/mingw810_32/bin/{libgcc_s_dw2-1,libstdc++-6,libwinpthread-1}.dll "$OUT/"
 cp "$QT/plugins/platforms/qwindows.dll" "$OUT/platforms/"
 cp "$QT/plugins/styles/qwindowsvistastyle.dll" "$OUT/styles/"
+# 瘦身：去掉 Qt DLL 和插件里用不到的符号表（约 32 MB -> 25 MB）。
+for f in "$OUT"/Qt5*.dll "$OUT"/platforms/*.dll "$OUT"/styles/*.dll; do
+    wine strip.exe --strip-unneeded "$(winepath -w "$f")"
+done
 (cd dist && rm -f TrailCanvas.zip && zip -q -r -9 TrailCanvas.zip TrailCanvas)
 du -sh dist/TrailCanvas dist/TrailCanvas.zip

@@ -116,6 +116,15 @@ void EdgeItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *option, 
     painter->setPen(QPen(color, active ? t.edgeActiveWidth : t.edgeWidth,
                          Qt::SolidLine, Qt::RoundCap));
     painter->setBrush(Qt::NoBrush);
+    if (m_progress < 1) {
+        // 描线动画：只画曲线的前一段，箭头等画完再出现。
+        const int steps = 24;
+        QPainterPath part(m_geo.curve.pointAtPercent(0));
+        for (int i = 1; i <= steps; ++i)
+            part.lineTo(m_geo.curve.pointAtPercent(m_progress * i / steps));
+        painter->drawPath(part);
+        return;
+    }
     painter->drawPath(m_geo.curve);
 
     if (!m_geo.arrow.isEmpty()) {
@@ -123,6 +132,12 @@ void EdgeItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *option, 
         painter->setBrush(color);
         painter->drawPolygon(m_geo.arrow);
     }
+}
+
+void EdgeItem::setDrawProgress(qreal p)
+{
+    m_progress = qBound<qreal>(0, p, 1);
+    update();
 }
 
 void EdgeItem::hoverEnterEvent(QGraphicsSceneHoverEvent *)

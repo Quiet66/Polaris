@@ -9,6 +9,7 @@ class CanvasView;
 class QMenu;
 class QSystemTrayIcon;
 class QTimer;
+class QVariantAnimation;
 
 // 画布左上角的小圆形按钮：平时半透明，悬停时显现。
 // 按住拖动超过几个像素 = 拖窗口；单击 = clicked()；双击 = doubleClicked()。
@@ -33,6 +34,10 @@ protected:
     void mouseDoubleClickEvent(QMouseEvent *event) override;
 
 private:
+    void fadeTo(qreal target);
+
+    QVariantAnimation *m_fade;
+    qreal  m_reveal = 0;            // 0 = 半透明，1 = 完全显现
     bool   m_hover = false;
     bool   m_pressed = false;
     bool   m_suppressClick = false;

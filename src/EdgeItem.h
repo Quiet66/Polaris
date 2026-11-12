@@ -38,6 +38,9 @@ public:
 
     void updateGeometry();      // 端点节点移动、改变大小，或方向开关变化后调用
 
+    // 描线动画进度：0 = 还没画，1 = 完整。只影响绘制，不影响命中范围。
+    void setDrawProgress(qreal p);
+
 protected:
     void hoverEnterEvent(QGraphicsSceneHoverEvent *event) override;
     void hoverLeaveEvent(QGraphicsSceneHoverEvent *event) override;
@@ -50,4 +53,5 @@ private:
     QPainterPath m_shape;
     QRectF       m_bounds;
     bool         m_hover = false;
+    qreal        m_progress = 1;
 };

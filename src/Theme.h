@@ -45,6 +45,9 @@ struct Theme
     qreal arrowHalfWidth      = 4;
     qreal linkedNodeGap       = 60;     // Tab 新建节点与来源节点的水平间距
     qreal linkedNodeStepGap   = 14;     // 重叠时向下错开的间隙
+    int   nodeAppearMs        = 120;    // 新建节点的缩放淡入
+    int   edgeDrawMs          = 180;    // 新建连线的描线动画
+    int   buttonFadeMs        = 120;    // 菜单按钮悬停显现
     qreal gridStep            = 24;     // 场景坐标
     qreal gridMinPixelStep    = 14;     // 缩小后网格的最小屏幕间距，低于它就把密度减半
 

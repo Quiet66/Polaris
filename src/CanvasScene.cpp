@@ -1,5 +1,6 @@
 #include "CanvasScene.h"
 #include "Commands.h"
+#include "Prefs.h"
 #include "EdgeItem.h"
 #include "Theme.h"
 
@@ -12,6 +13,7 @@
 #include <QPointer>
 #include <QTimer>
 #include <QUndoStack>
+#include <QVariantAnimation>
 
 #include <algorithm>
 
@@ -132,15 +134,22 @@ void CanvasScene::paintBackground(QPainter *painter, const QRectF &rect, qreal z
         painter->setPen(QPen(t.grid, 0));       // 0 = 恒为 1 像素
         painter->drawLines(lines.data(), lines.size());
     } else {
-        QVarLengthArray<QPointF, 1024> pts;
-        for (qreal x = left; x <= rect.right(); x += step)
-            for (qreal y = top; y <= rect.bottom(); y += step)
-                pts.append(QPointF(x, y));
-        QPen pen(t.grid, 2, Qt::SolidLine, Qt::RoundCap);
-        pen.setCosmetic(true);                  // 点的大小不随缩放变化
-        painter->setRenderHint(QPainter::Antialiasing, true);
-        painter->setPen(pen);
-        painter->drawPoints(pts.data(), pts.size());
+        // 每个点画成一个对齐到像素的 2x2 小方块，不开抗锯齿。
+        // 用抗锯齿的圆头画笔逐点描（drawPoints）在软件渲染下慢一个数量级：
+        // 200 个节点全屏重绘时，光背景就占 14 ms 里的 12 ms。
+        const QTransform world = painter->worldTransform();
+        QVarLengthArray<QRectF, 1024> dots;
+        for (qreal x = left; x <= rect.right(); x += step) {
+            for (qreal y = top; y <= rect.bottom(); y += step) {
+                const QPointF p = world.map(QPointF(x, y));
+                dots.append(QRectF(qRound(p.x()) - 1, qRound(p.y()) - 1, 2, 2));
+            }
+        }
+        painter->resetTransform();              // 点的大小不随缩放变化
+        painter->setRenderHint(QPainter::Antialiasing, false);
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(t.grid);
+        painter->drawRects(dots.data(), dots.size());
     }
     painter->restore();
 }
@@ -171,6 +180,62 @@ void CanvasScene::commitEditing()
 {
     if (NodeItem *n = editingNode())
         n->endEdit(NodeItem::Commit);
+}
+
+void CanvasScene::animateNodeIn(const QString &nodeId)
+{
+    NodeItem *n = m_nodes.value(nodeId);
+    if (!n || Prefs::instance().reduceMotion())
+        return;
+
+    // 120 ms 的缩放淡入。动画只记 id，每一帧重新查找：节点中途被删也不会访问野指针。
+    n->setTransformOriginPoint(n->bodyRect().center());
+    n->setScale(0.9);
+    n->setOpacity(0);
+
+    QVariantAnimation *a = new QVariantAnimation(this);
+    a->setDuration(Theme::current().nodeAppearMs);
+    a->setStartValue(0.0);
+    a->setEndValue(1.0);
+    a->setEasingCurve(QEasingCurve::OutCubic);
+    connect(a, &QVariantAnimation::valueChanged, this, [this, nodeId](const QVariant &v) {
+        if (NodeItem *node = m_nodes.value(nodeId)) {
+            const qreal t = v.toReal();
+            node->setTransformOriginPoint(node->bodyRect().center());
+            node->setScale(0.9 + 0.1 * t);
+            node->setOpacity(t);
+        }
+    });
+    connect(a, &QVariantAnimation::finished, this, [this, nodeId]() {
+        if (NodeItem *node = m_nodes.value(nodeId)) {
+            node->setScale(1);
+            node->setOpacity(1);
+        }
+    });
+    a->start(QAbstractAnimation::DeleteWhenStopped);
+}
+
+void CanvasScene::animateEdgeIn(const QString &edgeId)
+{
+    EdgeItem *e = m_edges.value(edgeId);
+    if (!e || Prefs::instance().reduceMotion())
+        return;
+
+    e->setDrawProgress(0);
+    QVariantAnimation *a = new QVariantAnimation(this);
+    a->setDuration(Theme::current().edgeDrawMs);
+    a->setStartValue(0.0);
+    a->setEndValue(1.0);
+    a->setEasingCurve(QEasingCurve::OutCubic);
+    connect(a, &QVariantAnimation::valueChanged, this, [this, edgeId](const QVariant &v) {
+        if (EdgeItem *edge = m_edges.value(edgeId))
+            edge->setDrawProgress(v.toReal());
+    });
+    connect(a, &QVariantAnimation::finished, this, [this, edgeId]() {
+        if (EdgeItem *edge = m_edges.value(edgeId))
+            edge->setDrawProgress(1);
+    });
+    a->start(QAbstractAnimation::DeleteWhenStopped);
 }
 
 // -------------------------------------------------------------------- 底层操作
@@ -303,6 +368,9 @@ void CanvasScene::startPendingNode(const QPointF &topLeft, NodeItem *from)
     clearSelection();
     n->setSelected(true);
     n->beginEdit();
+
+    animateNodeIn(d.id);
+    animateEdgeIn(m_pendingEdgeId);
 }
 
 void CanvasScene::createNodeAt(const QPointF &scenePos)
@@ -429,6 +497,7 @@ void CanvasScene::endLinkDrag(const QPointF &scenePos)
         e.createdAt = Document::now();
         snap.edges.append(e);
         m_undo->push(new AddItemsCommand(this, snap, false, QStringLiteral("连线")));
+        animateEdgeIn(e.id);
     } else {
         // 拖到空白处：在该处新建节点并连线，进入编辑。
         const Theme &t = Theme::current();

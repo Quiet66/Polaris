@@ -48,6 +48,10 @@ public:
 
     void commitEditing();                       // 如果正在编辑文字，先确认
 
+    // 新建时的动画（"精简动效"打开时直接跳过）。
+    void animateNodeIn(const QString &nodeId);
+    void animateEdgeIn(const QString &edgeId);
+
     // ---- 底层操作：直接改场景，不进撤销栈（供 Commands 和载入使用）
     NodeItem *addNode(const NodeData &data);
     EdgeItem *addEdge(const EdgeData &data);    // 自环、重复、端点不存在时返回 nullptr

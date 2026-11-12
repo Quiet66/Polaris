@@ -27,6 +27,7 @@
 #include <QStandardPaths>
 #include <QSystemTrayIcon>
 #include <QTimer>
+#include <QVariantAnimation>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPushButton>
@@ -88,7 +89,12 @@ QString hotkeyValue(const HotkeyDef &d)
 
 MenuButton::MenuButton(QWidget *parent)
     : QWidget(parent)
+    , m_fade(new QVariantAnimation(this))
 {
+    connect(m_fade, &QVariantAnimation::valueChanged, this, [this](const QVariant &v) {
+        m_reveal = v.toReal();
+        update();
+    });
     setFixedSize(kButtonSize, kButtonSize);
     setCursor(Qt::ArrowCursor);
     setToolTip(QStringLiteral("单击打开菜单，拖动移动窗口，双击最大化"));
@@ -99,22 +105,36 @@ void MenuButton::paintEvent(QPaintEvent *)
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing, true);
     QColor c = Theme::current().buttonFill;
-    c.setAlpha(m_pressed ? 220 : (m_hover ? 170 : 60));
+    c.setAlpha(m_pressed ? 220 : qRound(60 + 110 * m_reveal));
     p.setPen(Qt::NoPen);
     p.setBrush(c);
     p.drawEllipse(QRectF(rect()).adjusted(3, 3, -3, -3));
 }
 
+void MenuButton::fadeTo(qreal target)
+{
+    m_fade->stop();
+    if (Prefs::instance().reduceMotion()) {
+        m_reveal = target;      // 精简动效：直接到位
+        update();
+        return;
+    }
+    m_fade->setDuration(Theme::current().buttonFadeMs);
+    m_fade->setStartValue(m_reveal);
+    m_fade->setEndValue(target);
+    m_fade->start();
+}
+
 void MenuButton::enterEvent(QEvent *)
 {
     m_hover = true;
-    update();
+    fadeTo(1);
 }
 
 void MenuButton::leaveEvent(QEvent *)
 {
     m_hover = false;
-    update();
+    fadeTo(0);
 }
 
 void MenuButton::mousePressEvent(QMouseEvent *event)
