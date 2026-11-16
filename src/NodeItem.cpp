@@ -13,6 +13,7 @@
 #include <QMenu>
 #include <QMimeData>
 #include <QPainter>
+#include <QPointer>
 #include <QStyleOptionGraphicsItem>
 #include <QTextCursor>
 #include <QTextDocument>
@@ -74,34 +75,53 @@ void NodeTextItem::contextMenuEvent(QGraphicsSceneContextMenuEvent *event)
         event->ignore();
         return;
     }
-    QMenu menu;
-    Theme::polishMenu(&menu);
+
+    // 菜单必须是非模态的（popup，而不是 exec）：exec 会在这个函数里开一个嵌套事件循环，
+    // 菜单开着的时候节点可能被删除（例如空节点失去焦点后被清理），函数返回时 this 已经失效。
+    // 这里只把菜单弹出来就返回；各个动作执行前先确认图元还在、还处于编辑状态。
+    QMenu *menu = new QMenu;
+    menu->setAttribute(Qt::WA_DeleteOnClose);
+    Theme::polishMenu(menu);
+
+    const QPointer<NodeTextItem> self(this);
+    auto guarded = [self](void (*fn)(NodeTextItem *)) {
+        return [self, fn]() {
+            if (!self || !self->m_owner->isEditing())
+                return;
+            fn(self.data());
+            self->setFocus(Qt::OtherFocusReason);
+        };
+    };
+    auto copySelection = [](NodeTextItem *t) {
+        // 复制出去的也只给纯文本。
+        QApplication::clipboard()->setText(
+            t->textCursor().selectedText().replace(QChar(0x2029), QLatin1Char('\n')));
+    };
+
     const bool hasSelection = textCursor().hasSelection();
-    QAction *cut = menu.addAction(QStringLiteral("剪切"));
-    QAction *copy = menu.addAction(QStringLiteral("复制"));
-    QAction *paste = menu.addAction(QStringLiteral("粘贴"));
-    menu.addSeparator();
-    QAction *all = menu.addAction(QStringLiteral("全选"));
+    QAction *cut = menu->addAction(QStringLiteral("剪切"));
+    QAction *copy = menu->addAction(QStringLiteral("复制"));
+    QAction *paste = menu->addAction(QStringLiteral("粘贴"));
+    menu->addSeparator();
+    QAction *all = menu->addAction(QStringLiteral("全选"));
     cut->setEnabled(hasSelection);
     copy->setEnabled(hasSelection);
 
-    QAction *chosen = menu.exec(event->screenPos());
-    if (!m_owner->isEditing())
-        return;
-    if (chosen == cut || chosen == copy) {
-        // 复制出去的也只给纯文本。
-        QApplication::clipboard()->setText(textCursor().selectedText().replace(QChar(0x2029),
-                                                                               QLatin1Char('\n')));
-        if (chosen == cut)
-            textCursor().removeSelectedText();
-    } else if (chosen == paste) {
-        pastePlainText();
-    } else if (chosen == all) {
-        QTextCursor c = textCursor();
+    static void (*const doCopy)(NodeTextItem *) = copySelection;
+    QObject::connect(cut, &QAction::triggered, menu, guarded([](NodeTextItem *t) {
+        doCopy(t);
+        t->textCursor().removeSelectedText();
+    }));
+    QObject::connect(copy, &QAction::triggered, menu, guarded(doCopy));
+    QObject::connect(paste, &QAction::triggered, menu,
+                     guarded([](NodeTextItem *t) { t->pastePlainText(); }));
+    QObject::connect(all, &QAction::triggered, menu, guarded([](NodeTextItem *t) {
+        QTextCursor c = t->textCursor();
         c.select(QTextCursor::Document);
-        setTextCursor(c);
-    }
-    setFocus(Qt::OtherFocusReason);
+        t->setTextCursor(c);
+    }));
+
+    menu->popup(event->screenPos());
     event->accept();
 }
 
@@ -478,6 +498,9 @@ void NodeItem::endEdit(EditEnd how)
         return;
     m_editing = false;      // 先置位：下面 clearFocus 会再次触发 focusOut
 
+    // 先让出焦点再取文字：输入法还在组词时，失去焦点会把组到一半的内容上屏，
+    // 这样确认时不会丢掉最后几个字。
+    m_text->clearFocus();
     const QString newText = (how == Cancel) ? m_textBeforeEdit
                                             : m_text->toPlainText().trimmed();
 
@@ -486,7 +509,6 @@ void NodeItem::endEdit(EditEnd how)
     m_text->setTextCursor(c);
     m_text->setTextInteractionFlags(Qt::NoTextInteraction);
     m_text->setAcceptedMouseButtons(Qt::NoButton);
-    m_text->clearFocus();
     m_text->setVisible(false);
 
     m_data.text = newText;

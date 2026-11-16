@@ -1,6 +1,9 @@
 #include "WinNative.h"
 
+#include <QString>
 #include <QWidget>
+
+#include <string>
 
 #include <windows.h>
 #include <windowsx.h>
@@ -113,13 +116,61 @@ void notifyExistingInstance()
     PostMessageW(HWND_BROADCAST, activateMessage(), 0, 0);
 }
 
+// ---- 崩溃记录
+
+namespace {
+
+wchar_t g_crashLogPath[MAX_PATH * 2] = L"";
+
+LONG WINAPI crashFilter(EXCEPTION_POINTERS *info)
+{
+    // 进程状态已经不可信：只用最基本的 Win32 调用把几个数字写进文件，不碰 Qt，不分配堆内存。
+    HANDLE f = CreateFileW(g_crashLogPath, FILE_APPEND_DATA, FILE_SHARE_READ, nullptr,
+                           OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (f != INVALID_HANDLE_VALUE) {
+        SYSTEMTIME t;
+        GetLocalTime(&t);
+        const EXCEPTION_RECORD *r = info->ExceptionRecord;
+        const UINT_PTR base = reinterpret_cast<UINT_PTR>(GetModuleHandleW(nullptr));
+        const UINT_PTR addr = reinterpret_cast<UINT_PTR>(r->ExceptionAddress);
+        char line[256];
+        const int n = wsprintfA(line,
+            "%04d-%02d-%02d %02d:%02d:%02d crash code=0x%08lX address=0x%08lX exe_base=0x%08lX "
+            "info0=0x%08lX info1=0x%08lX\r\n",
+            t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond,
+            static_cast<unsigned long>(r->ExceptionCode), static_cast<unsigned long>(addr),
+            static_cast<unsigned long>(base),
+            static_cast<unsigned long>(r->NumberParameters > 0 ? r->ExceptionInformation[0] : 0),
+            static_cast<unsigned long>(r->NumberParameters > 1 ? r->ExceptionInformation[1] : 0));
+        DWORD written = 0;
+        WriteFile(f, line, DWORD(n), &written, nullptr);
+        CloseHandle(f);
+    }
+    return EXCEPTION_CONTINUE_SEARCH;   // 交还给系统：照常结束进程
+}
+
+} // namespace
+
+void installCrashLogger(const QString &logPath)
+{
+    const std::wstring w = logPath.toStdWString();
+    if (w.size() >= sizeof(g_crashLogPath) / sizeof(wchar_t))
+        return;
+    lstrcpyW(g_crashLogPath, w.c_str());
+    SetUnhandledExceptionFilter(crashFilter);
+}
+
 void setupFramelessWindow(QWidget *window)
 {
     HWND hwnd = hwndOf(window);
     LONG style = GetWindowLongW(hwnd, GWL_STYLE);
     // WS_THICKFRAME：系统边缘缩放与 Aero Snap；WS_MAXIMIZEBOX/WS_MINIMIZEBOX：最大化、最小化。
     // 不加 WS_CAPTION，避免 Win7 上露出标题栏。
-    style |= WS_THICKFRAME | WS_MAXIMIZEBOX | WS_MINIMIZEBOX | WS_SYSMENU;
+    // 不加 WS_SYSMENU：有它的话 Alt+空格会弹出系统菜单（还原/移动/大小/最小化/最大化/关闭），
+    // 而空格和 Alt 正好是拖画布、拖窗口的常用键，很容易误触；菜单里的"移动""大小"
+    // 是键盘模态操作，进去之后窗口看起来就像卡死了。
+    style |= WS_THICKFRAME | WS_MAXIMIZEBOX | WS_MINIMIZEBOX;
+    style &= ~WS_SYSMENU;
     SetWindowLongW(hwnd, GWL_STYLE, style);
     SetWindowPos(hwnd, nullptr, 0, 0, 0, 0,
                  SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
@@ -166,6 +217,18 @@ bool handleNativeEvent(QWidget *window, const QByteArray &eventType, void *messa
     }
 
     switch (msg->message) {
+    case WM_SYSCOMMAND: {
+        // 挡掉键盘触发的系统菜单（Alt、F10、Alt+空格）以及键盘方式的移动、调整大小：
+        // 它们都会让窗口进入系统的模态循环，期间画布不响应任何操作。
+        // 鼠标拖边缘调整大小（SC_SIZE 带方向）和系统拖动（SC_MOVE | HTCAPTION）不受影响。
+        const WPARAM cmd = msg->wParam & 0xFFF0;
+        const WPARAM detail = msg->wParam & 0x000F;
+        if (cmd == SC_KEYMENU || ((cmd == SC_MOVE || cmd == SC_SIZE) && detail == 0)) {
+            *result = 0;
+            return true;
+        }
+        return false;
+    }
     case WM_HOTKEY:
         events->hotkeyId = int(msg->wParam);
         *result = 0;

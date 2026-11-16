@@ -2,6 +2,7 @@
 // 所有 Win32 专用调用都集中在这里；其他文件不得包含 windows.h。
 
 #include <QByteArray>
+#include <QString>
 #include <Qt>
 
 class QWidget;
@@ -40,6 +41,11 @@ void bringToFront(QWidget *window);
 bool registerHotkey(QWidget *window, int id, int key, Qt::KeyboardModifiers modifiers,
                     bool allowRepeat);
 void unregisterHotkey(QWidget *window, int id);
+
+// ---- 崩溃记录
+
+// 程序因未处理的异常崩溃时，往 logPath 追加一行（时间、异常代码、地址），然后照常结束。
+void installCrashLogger(const QString &logPath);
 
 // ---- 单实例（命名互斥量）
 

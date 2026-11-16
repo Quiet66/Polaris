@@ -48,6 +48,7 @@ protected:
     void mouseMoveEvent(QMouseEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
     void mouseDoubleClickEvent(QMouseEvent *event) override;
+    void contextMenuEvent(QContextMenuEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
     void keyReleaseEvent(QKeyEvent *event) override;
     void focusOutEvent(QFocusEvent *event) override;
@@ -63,6 +64,11 @@ private:
     bool   m_panning = false;
     bool   m_movingWindow = false;
     Qt::MouseButton m_dragButton = Qt::NoButton;    // 开始平移或拖窗口的那个键
+    // 按下时被视图吃掉、没有交给场景的键。它们的释放也必须吃掉：
+    // 场景收到的按下和释放必须成对，否则会留下一个"还在拖"的图元，之后的点击全部错位。
+    Qt::MouseButtons m_swallowedButtons = Qt::NoButton;
+    QPoint m_dragPressGlobal;                       // 手势按下时的位置，用来判断有没有真的拖动
+    bool   m_suppressContextMenu = false;           // 右键拖动之后不弹右键菜单
     QPoint m_windowDragOffset;                      // 光标相对窗口左上角的偏移
     MouseGesture m_panGesture = MouseGesture::SpaceLeft;
     MouseGesture m_windowGesture = MouseGesture::AltLeft;

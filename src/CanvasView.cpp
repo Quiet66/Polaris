@@ -3,6 +3,8 @@
 #include "EdgeItem.h"
 #include "Theme.h"
 
+#include <QApplication>
+#include <QContextMenuEvent>
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QScrollBar>
@@ -223,16 +225,24 @@ QMouseEvent CanvasView::shiftAsCtrl(const QMouseEvent *event)
 
 void CanvasView::mousePressEvent(QMouseEvent *event)
 {
-    if (m_panning || m_movingWindow) {
-        event->accept();        // 拖动途中又按了别的键：忽略
+    m_suppressContextMenu = false;
+
+    // 已经有别的鼠标键按着（正在拖节点、框选、拖连线，或正在平移 / 拖窗口）：
+    // 这次按下一律吃掉。不能在别的操作进行到一半时插进一个手势，
+    // 否则原来那个操作的释放事件会丢，场景里的拖动状态就卡住了。
+    if (event->buttons() != event->button() || m_panning || m_movingWindow) {
+        m_swallowedButtons |= event->button();
+        event->accept();
         return;
     }
 
     // 拖动整个窗口（手势可在设置里改）。自己跟着光标移动窗口，这样任何鼠标键都能用。
     if (matches(m_windowGesture, event)) {
+        m_swallowedButtons |= event->button();
         if (!window()->isMaximized()) {
             m_movingWindow = true;
             m_dragButton = event->button();
+            m_dragPressGlobal = event->globalPos();
             m_windowDragOffset = event->globalPos() - window()->pos();
             updateCursor();
         }
@@ -244,14 +254,17 @@ void CanvasView::mousePressEvent(QMouseEvent *event)
     const bool middleFree = event->button() == Qt::MiddleButton
                          && m_windowGesture != MouseGesture::Middle;
     if (matches(m_panGesture, event) || middleFree) {
+        m_swallowedButtons |= event->button();
         m_panning = true;
         m_dragButton = event->button();
+        m_dragPressGlobal = event->globalPos();
         m_lastPanPos = event->pos();
         updateCursor();
         event->accept();
         return;
     }
     if (event->button() == Qt::RightButton && !m_scene->editingNode()) {
+        m_swallowedButtons |= event->button();
         event->accept();        // 右键没有分配手势时不做任何事（不改变选择）
         return;
     }
@@ -283,8 +296,14 @@ void CanvasView::mouseMoveEvent(QMouseEvent *event)
 
 void CanvasView::mouseReleaseEvent(QMouseEvent *event)
 {
-    if (m_panning || m_movingWindow) {
-        if (event->button() == m_dragButton) {
+    if (m_swallowedButtons & event->button()) {
+        m_swallowedButtons &= ~Qt::MouseButtons(event->button());
+        if ((m_panning || m_movingWindow) && event->button() == m_dragButton) {
+            // 用右键拖过之后，Windows 会在松开时再发一个"右键菜单"事件，这里标记一下把它挡掉。
+            // 只是点了一下没拖动的话不挡，这样编辑文字时右键菜单仍然可用。
+            const int moved = (event->globalPos() - m_dragPressGlobal).manhattanLength();
+            m_suppressContextMenu = event->button() == Qt::RightButton
+                                 && moved >= QApplication::startDragDistance();
             m_panning = false;
             m_movingWindow = false;
             m_dragButton = Qt::NoButton;
@@ -299,8 +318,28 @@ void CanvasView::mouseReleaseEvent(QMouseEvent *event)
         m_rubberBanding = false;
 }
 
+void CanvasView::contextMenuEvent(QContextMenuEvent *event)
+{
+    if (m_suppressContextMenu) {
+        m_suppressContextMenu = false;
+        event->accept();
+        return;
+    }
+    QGraphicsView::contextMenuEvent(event);
+}
+
 void CanvasView::mouseDoubleClickEvent(QMouseEvent *event)
 {
+    // 快速连按时，第二次按下是以"双击"事件送来的。凡是会被视图自己处理的情况
+    // （别的键还按着、正在手势中、这个键本身是手势键或右键），都当作一次普通按下，
+    // 走同一套配对逻辑。
+    const bool busy = event->buttons() != event->button() || m_panning || m_movingWindow;
+    const bool gesture = matches(m_windowGesture, event) || matches(m_panGesture, event)
+                      || event->button() != Qt::LeftButton;
+    if (busy || gesture) {
+        mousePressEvent(event);
+        return;
+    }
     if (event->button() == Qt::LeftButton && !m_spaceDown && !itemAt(event->pos())) {
         m_scene->createNodeAt(mapToScene(event->pos()));
         event->accept();
@@ -415,6 +454,8 @@ void CanvasView::focusOutEvent(QFocusEvent *event)
     m_panning = false;
     m_movingWindow = false;
     m_dragButton = Qt::NoButton;
+    m_suppressContextMenu = false;
+    // m_swallowedButtons 不清：键还按着的话，之后的释放仍然要吃掉。
     updateCursor();
     QGraphicsView::focusOutEvent(event);
 }
